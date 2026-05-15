@@ -1,0 +1,6 @@
+dist/
+node_modules/
+.clasprc.json
+.clasp.json
+*.env
+projects.json
