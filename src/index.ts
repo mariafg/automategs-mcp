@@ -8,7 +8,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import fs from 'fs';
 import { resolveTier } from './auth/license.js';
-import { isClaspAuthenticated, testClaspConnection } from './auth/clasp.js';
+import { isClaspAuthenticated, runClaspLoginBrowser, testClaspConnection } from './auth/clasp.js';
 import { loadRegistry, saveRegistry } from './registry/projects.js';
 import { CONFIG_DIR, SCRIPTS_DIR, APPS_SCRIPT_SETTINGS_URL } from './utils/constants.js';
 import type { Tier } from './registry/types.js';
@@ -27,7 +27,7 @@ fs.mkdirSync(SCRIPTS_DIR, { recursive: true });
 // ---------------------------------------------------------------------------
 // Startup state — initialised in the background after transport is connected
 // ---------------------------------------------------------------------------
-type StartupState = 'pending' | 'auth_required' | 'api_disabled' | 'error' | 'ready';
+type StartupState = 'pending' | 'authenticating' | 'auth_required' | 'api_disabled' | 'error' | 'ready';
 let startupState: StartupState = 'pending';
 let startupMessage = '';
 let currentTier: Tier = 'free';
@@ -87,20 +87,26 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     };
   }
 
+  if (startupState === 'authenticating') {
+    return {
+      content: [{
+        type: 'text',
+        text: JSON.stringify({
+          status: 'authenticating',
+          message: 'A Google sign-in tab just opened in your browser. Complete the sign-in there, then try again.',
+        }),
+      }],
+    };
+  }
+
   if (startupState === 'auth_required') {
     return {
       content: [{
         type: 'text',
         text: JSON.stringify({
-          error: 'clasp authentication required',
+          error: 'authentication failed',
           message: startupMessage,
-          instructions: [
-            'Run this command in your terminal (outside Claude), then restart AutomateGS:',
-            '',
-            '  npx @google/clasp login',
-            '',
-            'A browser window will open for Google sign-in.',
-          ].join('\n'),
+          instructions: 'Restart AutomateGS to try again. A browser window will open for Google sign-in.',
         }),
       }],
     };
@@ -150,13 +156,18 @@ await server.connect(transport);
     // 1. Resolve license tier
     currentTier = await resolveTier(process.env.LICENSE_KEY);
 
-    // 2. Check clasp authentication
+    // 2. Check clasp authentication — open browser automatically if needed
     if (!isClaspAuthenticated()) {
-      startupState = 'auth_required';
-      startupMessage =
-        'clasp is not authenticated. Run "npx @google/clasp login" in a terminal, then restart AutomateGS.';
-      console.error('[AutomateGS] ' + startupMessage);
-      return;
+      startupState = 'authenticating';
+      console.error('[AutomateGS] Opening Google sign-in in your browser…');
+      try {
+        await runClaspLoginBrowser();
+      } catch (err) {
+        startupState = 'auth_required';
+        startupMessage = `Google sign-in failed: ${String(err)}`;
+        console.error('[AutomateGS] ' + startupMessage);
+        return;
+      }
     }
 
     // 3. Test connection / API availability
