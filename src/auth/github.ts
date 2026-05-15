@@ -1,5 +1,7 @@
+import { simpleGit } from 'simple-git';
 import { getSecret, storeSecret } from './keychain.js';
 import { GITHUB_CLIENT_ID } from '../utils/constants.js';
+import type { Registry } from '../registry/types.js';
 
 export async function isGithubConnected(): Promise<boolean> {
   const token = await getSecret('github-token');
@@ -100,4 +102,63 @@ export async function getGithubToken(): Promise<string | null> {
 
 export async function getGithubUsername(): Promise<string | null> {
   return getSecret('github-username');
+}
+
+export async function ensureRepo(username: string, token: string): Promise<string> {
+  const repoName = 'automategs-scripts';
+  const checkRes = await fetch(`https://api.github.com/repos/${username}/${repoName}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/vnd.github.v3+json',
+    },
+  });
+
+  if (checkRes.ok) {
+    const repo = (await checkRes.json()) as { html_url: string };
+    return repo.html_url;
+  }
+
+  if (checkRes.status !== 404) {
+    throw new Error(`GitHub API error: ${checkRes.status}`);
+  }
+
+  const createRes = await fetch('https://api.github.com/user/repos', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      Accept: 'application/vnd.github.v3+json',
+    },
+    body: JSON.stringify({
+      name: repoName,
+      private: true,
+      description: 'AutomateGS automations',
+    }),
+  });
+
+  if (!createRes.ok) {
+    throw new Error(`Failed to create repo: ${createRes.status} ${await createRes.text()}`);
+  }
+
+  const repo = (await createRes.json()) as { html_url: string };
+  return repo.html_url;
+}
+
+export async function commitAndPush(params: {
+  localPath: string;
+  message: string;
+}): Promise<void> {
+  const git = simpleGit(params.localPath);
+  await git.add('.');
+  try {
+    await git.commit(params.message);
+  } catch {
+    return; // nothing to commit
+  }
+  await git.push('origin', 'main');
+}
+
+export async function pushRegistry(registry: Registry): Promise<void> {
+  // Registry state is committed per-project via commitAndPush; nothing extra needed.
+  void registry;
 }

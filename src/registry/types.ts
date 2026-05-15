@@ -70,6 +70,20 @@ export interface ExecutionResult {
   message?: string;
 }
 
+export interface StagingSession {
+  sessionId: string;
+  projectId: string;
+  fnName: string;
+  originalSheetId: string;
+  tempSheetId: string;
+  tempSheetUrl: string;
+  importRangesFound: number;
+  importRangesAuthorized: number;
+  executionResult?: ExecutionResult;
+  status: 'copying' | 'authorizing' | 'executing' | 'awaiting_approval' | 'approved' | 'rejected';
+  createdAt: string;
+}
+
 export interface TemplateManifest {
   id: string;
   name: string;
