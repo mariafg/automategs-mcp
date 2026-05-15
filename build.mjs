@@ -23,7 +23,7 @@ await esbuild.build({
   target: 'node20',
   outfile: 'dist/index.js',
   format: 'esm',
-  external: ['keytar'],
+  external: [],
   define: {
     __PKG_VERSION__: JSON.stringify(pkg.version),
     __BUILD_TIME__: JSON.stringify(buildTime),
