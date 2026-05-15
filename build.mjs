@@ -38,7 +38,7 @@ const obfuscated = JavaScriptObfuscator.obfuscate(code, {
   deadCodeInjection: true,
   deadCodeInjectionThreshold: 0.2,
   identifierNamesGenerator: 'hexadecimal',
-  selfDefending: true,
+  selfDefending: false,
 });
 writeFileSync(join(__dirname, 'dist/index.js'), obfuscated.getObfuscatedCode());
 
