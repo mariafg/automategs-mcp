@@ -1,3 +1,20 @@
+// Keep stdin open immediately — prevents the process from exiting before the
+// MCP transport registers its own stdin listener.  Must be the very first
+// executable statement so it takes effect even if later async code is slow.
+process.stdin.resume();
+
+// Catch any unhandled async errors that would otherwise kill the process
+// silently.  Log them to stderr (visible in MCP logs) and keep running.
+process.on('unhandledRejection', (reason: unknown) => {
+  console.error('[AutomateGS] UNHANDLED REJECTION — this is a bug, please report it');
+  console.error(reason instanceof Error ? reason.stack ?? String(reason) : String(reason));
+});
+
+process.on('uncaughtException', (err: Error) => {
+  console.error('[AutomateGS] UNCAUGHT EXCEPTION — this is a bug, please report it');
+  console.error(err.stack ?? String(err));
+});
+
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
@@ -20,12 +37,35 @@ import { tools as versionTools, handlers as versionHandlers } from './tools/vers
 import { tools as listTemplateTools, handlers as listTemplateHandlers } from './tools/list-templates.js';
 import { tools as addTemplateTools, handlers as addTemplateHandlers } from './tools/add-template.js';
 
-// Ensure config directories exist (sync, safe at any point)
-fs.mkdirSync(CONFIG_DIR, { recursive: true });
-fs.mkdirSync(SCRIPTS_DIR, { recursive: true });
+// Injected at build time by esbuild define
+declare const __PKG_VERSION__: string;
+declare const __BUILD_TIME__: string;
 
 // ---------------------------------------------------------------------------
-// Startup state — initialised in the background after transport is connected
+// Banner — appears in MCP logs immediately on launch
+// ---------------------------------------------------------------------------
+const VERSION = typeof __PKG_VERSION__ !== 'undefined' ? __PKG_VERSION__ : 'dev';
+const BUILD_TIME = typeof __BUILD_TIME__ !== 'undefined' ? __BUILD_TIME__ : 'unknown';
+
+console.error(`[AutomateGS] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+console.error(`[AutomateGS] AutomateGS MCP  v${VERSION}`);
+console.error(`[AutomateGS] Built            ${BUILD_TIME}`);
+console.error(`[AutomateGS] Node.js          ${process.version}`);
+console.error(`[AutomateGS] PID              ${process.pid}`);
+console.error(`[AutomateGS] Platform         ${process.platform}`);
+console.error(`[AutomateGS] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+
+// ---------------------------------------------------------------------------
+// Config directories
+// ---------------------------------------------------------------------------
+console.error(`[AutomateGS] [1/6] Ensuring config directories…`);
+fs.mkdirSync(CONFIG_DIR, { recursive: true });
+fs.mkdirSync(SCRIPTS_DIR, { recursive: true });
+console.error(`[AutomateGS]       CONFIG_DIR  = ${CONFIG_DIR}`);
+console.error(`[AutomateGS]       SCRIPTS_DIR = ${SCRIPTS_DIR}`);
+
+// ---------------------------------------------------------------------------
+// Startup state
 // ---------------------------------------------------------------------------
 type StartupState = 'pending' | 'authenticating' | 'auth_required' | 'api_disabled' | 'error' | 'ready';
 let startupState: StartupState = 'pending';
@@ -35,6 +75,8 @@ let currentTier: Tier = 'free';
 // ---------------------------------------------------------------------------
 // Collect tools and handlers
 // ---------------------------------------------------------------------------
+console.error(`[AutomateGS] [2/6] Registering tools…`);
+
 const allTools = [
   ...automationTools,
   ...schedulingTools,
@@ -43,6 +85,8 @@ const allTools = [
   ...listTemplateTools,
   ...addTemplateTools,
 ];
+
+console.error(`[AutomateGS]       ${allTools.length} tools registered: ${allTools.map((t) => t.name).join(', ')}`);
 
 type Handler = (
   args: Record<string, unknown>,
@@ -59,78 +103,71 @@ const allHandlers = new Map<string, Handler>([
 ]);
 
 // ---------------------------------------------------------------------------
-// MCP server — created and connected BEFORE any async startup work
+// MCP server
 // ---------------------------------------------------------------------------
+console.error(`[AutomateGS] [3/6] Creating MCP server…`);
+
 const server = new Server(
-  { name: 'automategs-mcp', version: '1.0.0' },
+  { name: 'automategs-mcp', version: VERSION },
   { capabilities: { tools: {} } },
 );
 
-server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: allTools }));
+server.setRequestHandler(ListToolsRequestSchema, async () => {
+  console.error(`[AutomateGS] → tools/list (state: ${startupState})`);
+  return { tools: allTools };
+});
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: rawArgs } = request.params;
   const args = (rawArgs ?? {}) as Record<string, unknown>;
+  console.error(`[AutomateGS] → tools/call "${name}" (state: ${startupState})`);
 
-  // Tools that work regardless of clasp state
   const claspFreeTools = new Set(['list_automations', 'list_templates', 'check_status']);
 
   if (startupState === 'pending' && !claspFreeTools.has(name)) {
     return {
-      content: [{
-        type: 'text',
-        text: JSON.stringify({
-          status: 'initializing',
-          message: 'AutomateGS is still starting up. Please wait a moment and try again.',
-        }),
-      }],
+      content: [{ type: 'text', text: JSON.stringify({
+        status: 'initializing',
+        message: 'AutomateGS is still starting up. Please wait a moment and try again.',
+      }) }],
     };
   }
 
   if (startupState === 'authenticating') {
     return {
-      content: [{
-        type: 'text',
-        text: JSON.stringify({
-          status: 'authenticating',
-          message: 'A Google sign-in tab just opened in your browser. Complete the sign-in there, then try again.',
-        }),
-      }],
+      content: [{ type: 'text', text: JSON.stringify({
+        status: 'authenticating',
+        message: 'A Google sign-in tab just opened in your browser. Complete the sign-in there, then try again.',
+      }) }],
     };
   }
 
   if (startupState === 'auth_required') {
     return {
-      content: [{
-        type: 'text',
-        text: JSON.stringify({
-          error: 'authentication failed',
-          message: startupMessage,
-          instructions: 'Restart AutomateGS to try again. A browser window will open for Google sign-in.',
-        }),
-      }],
+      content: [{ type: 'text', text: JSON.stringify({
+        error: 'authentication failed',
+        message: startupMessage,
+        instructions: 'Restart AutomateGS to try again. A browser window will open for Google sign-in.',
+      }) }],
     };
   }
 
   if (startupState === 'api_disabled') {
     return {
-      content: [{
-        type: 'text',
-        text: JSON.stringify({
-          error: 'Google Apps Script API not enabled',
-          message: startupMessage,
-          instructions: `Enable it at: ${APPS_SCRIPT_SETTINGS_URL}\nThen restart AutomateGS.`,
-        }),
-      }],
+      content: [{ type: 'text', text: JSON.stringify({
+        error: 'Google Apps Script API not enabled',
+        message: startupMessage,
+        instructions: `Enable it at: ${APPS_SCRIPT_SETTINGS_URL}\nThen restart AutomateGS.`,
+      }) }],
     };
   }
 
   if (startupState === 'error') {
     return {
-      content: [{
-        type: 'text',
-        text: JSON.stringify({ error: 'AutomateGS startup failed', message: startupMessage }),
-      }],
+      content: [{ type: 'text', text: JSON.stringify({
+        error: 'AutomateGS startup failed',
+        message: startupMessage,
+      }) }],
     };
   }
 
@@ -143,57 +180,74 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   return handler(args, { registry: currentRegistry, tier: currentTier });
 });
 
-// Connect transport first — this lets the MCP client complete its handshake
-// immediately, before any slow startup work begins.
+// ---------------------------------------------------------------------------
+// Connect transport — must happen before background init so the MCP handshake
+// completes immediately and the client doesn't time out.
+// ---------------------------------------------------------------------------
+console.error(`[AutomateGS] [4/6] Connecting MCP transport (stdio)…`);
 const transport = new StdioServerTransport();
 await server.connect(transport);
+console.error(`[AutomateGS]       Transport connected — MCP handshake ready`);
 
 // ---------------------------------------------------------------------------
-// Background initialisation — runs after the MCP handshake is complete
+// Background initialisation
 // ---------------------------------------------------------------------------
+console.error(`[AutomateGS] [5/6] Starting background initialisation…`);
+
 (async () => {
   try {
-    // 1. Resolve license tier
+    // License
+    console.error(`[AutomateGS]       Resolving license tier…`);
     currentTier = await resolveTier(process.env.LICENSE_KEY);
+    console.error(`[AutomateGS]       Tier: ${currentTier}`);
 
-    // 2. Check clasp authentication — open browser automatically if needed
-    if (!isClaspAuthenticated()) {
+    // Clasp auth
+    console.error(`[AutomateGS]       Checking clasp authentication…`);
+    const authed = isClaspAuthenticated();
+    console.error(`[AutomateGS]       isClaspAuthenticated = ${authed}`);
+
+    if (!authed) {
       startupState = 'authenticating';
-      console.error('[AutomateGS] Opening Google sign-in in your browser…');
+      console.error(`[AutomateGS]       Opening Google sign-in in browser…`);
       try {
         await runClaspLoginBrowser();
+        console.error(`[AutomateGS]       Google authentication complete`);
       } catch (err) {
         startupState = 'auth_required';
         startupMessage = `Google sign-in failed: ${String(err)}`;
-        console.error('[AutomateGS] ' + startupMessage);
+        console.error(`[AutomateGS]       ${startupMessage}`);
         return;
       }
     }
 
-    // 3. Test connection / API availability
+    // Clasp API connectivity
+    console.error(`[AutomateGS]       Testing Apps Script API connectivity…`);
     const claspStatus = await testClaspConnection();
+    console.error(`[AutomateGS]       Clasp status: ${claspStatus}`);
+
     if (claspStatus === 'api_disabled') {
       startupState = 'api_disabled';
-      startupMessage =
-        `Apps Script API is not enabled. Visit ${APPS_SCRIPT_SETTINGS_URL} and toggle it on, then restart.`;
-      console.error('[AutomateGS] ' + startupMessage);
+      startupMessage = `Apps Script API not enabled. Visit ${APPS_SCRIPT_SETTINGS_URL} to enable it.`;
+      console.error(`[AutomateGS]       ${startupMessage}`);
       return;
     }
 
-    // 4. Load and persist registry
+    // Registry
+    console.error(`[AutomateGS]       Loading registry…`);
     const registry = loadRegistry();
     registry.tier = currentTier;
     saveRegistry(registry);
+    const projectCount = Object.keys(registry.projects).length;
+    console.error(`[AutomateGS]       Registry loaded — ${projectCount} automation(s), ${registry.totalExecutions} execution(s)`);
 
     startupState = 'ready';
-    console.error(
-      `[AutomateGS] Ready | tier: ${currentTier}` +
-        ` | automations: ${Object.keys(registry.projects).length}` +
-        ` | executions: ${registry.totalExecutions}`,
-    );
+    console.error(`[AutomateGS] [6/6] ✓ Ready | v${VERSION} | tier: ${currentTier} | automations: ${projectCount}`);
   } catch (err) {
     startupState = 'error';
     startupMessage = String(err);
-    console.error(`[AutomateGS] Startup error: ${startupMessage}`);
+    console.error(`[AutomateGS]       STARTUP ERROR: ${startupMessage}`);
+    if (err instanceof Error && err.stack) {
+      console.error(err.stack);
+    }
   }
 })();

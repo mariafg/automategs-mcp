@@ -7,10 +7,15 @@ import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+const pkg = JSON.parse(readFileSync(join(__dirname, 'package.json'), 'utf8'));
+const buildTime = new Date().toISOString();
+
+console.log(`Building automategs-mcp v${pkg.version} at ${buildTime}`);
+
 // 1. Clean dist/
 await rimraf(join(__dirname, 'dist'));
 
-// 2. esbuild bundle
+// 2. esbuild bundle — inject version + build timestamp as compile-time constants
 await esbuild.build({
   entryPoints: ['src/index.ts'],
   bundle: true,
@@ -19,6 +24,10 @@ await esbuild.build({
   outfile: 'dist/index.js',
   format: 'esm',
   external: ['keytar'],
+  define: {
+    __PKG_VERSION__: JSON.stringify(pkg.version),
+    __BUILD_TIME__: JSON.stringify(buildTime),
+  },
   banner: {
     js: "import { createRequire } from 'module'; const require = createRequire(import.meta.url);",
   },
@@ -26,17 +35,17 @@ await esbuild.build({
 
 console.log('esbuild bundle complete');
 
-// 3. javascript-obfuscator on dist/index.js
+// 3. Obfuscate — string array only.
+//    controlFlowFlattening and deadCodeInjection both restructure async/await
+//    into switch-state machines that break Promise chains in Node.js MCP servers.
 const code = readFileSync(join(__dirname, 'dist/index.js'), 'utf8');
 const obfuscated = JavaScriptObfuscator.obfuscate(code, {
   compact: true,
   stringArray: true,
   stringArrayEncoding: ['rc4'],
   stringArrayThreshold: 0.75,
-  controlFlowFlattening: true,
-  controlFlowFlatteningThreshold: 0.5,
-  deadCodeInjection: true,
-  deadCodeInjectionThreshold: 0.2,
+  controlFlowFlattening: false,
+  deadCodeInjection: false,
   identifierNamesGenerator: 'hexadecimal',
   selfDefending: false,
 });
@@ -53,9 +62,10 @@ for (const file of filesToCopy) {
     copyFileSync(src, dest);
     console.log(`Copied ${file} to dist/`);
   } else if (file === 'icon.png') {
-    // Create empty icon.png if not present
     writeFileSync(dest, '');
     console.log('Created empty icon.png in dist/');
+  } else {
+    console.warn(`WARNING: ${file} not found — skipped`);
   }
 }
 
