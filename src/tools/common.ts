@@ -1,7 +1,8 @@
 import fs from 'fs';
 import path from 'path';
+import { execFile } from 'child_process';
 import { McpError, ErrorCode } from '@modelcontextprotocol/sdk/types.js';
-import { runClasp } from '../auth/clasp.js';
+import { runClasp, getAccessToken } from '../auth/clasp.js';
 import { SCRIPTS_DIR, EXECUTION_TIMEOUT_MS } from '../utils/constants.js';
 import { buildScriptCode, buildAppsScriptManifest, DEFAULT_SCOPES } from '../gas/template.js';
 import type { Registry, Tier } from '../registry/types.js';
@@ -132,6 +133,18 @@ export async function finishProjectSetup(
   }
 
   const webAppUrl = `https://script.google.com/macros/s/${deploymentId}/exec`;
+
+  // Open the web app URL in the browser immediately after deployment so the
+  // owner can complete the one-time Google script-project authorization.
+  // Without this step Google returns 403 when the web app tries to execute
+  // on the owner's behalf.  Best-effort — don't block on failure.
+  try {
+    execFile('/usr/bin/open', [webAppUrl]);
+    console.error(`[AutomateGS] Opened browser for web app authorization: ${webAppUrl}`);
+  } catch {
+    console.error(`[AutomateGS] Could not auto-open browser. Please visit: ${webAppUrl}`);
+  }
+
   return { scriptId, webAppUrl, localPath, deploymentId };
 }
 
@@ -205,24 +218,51 @@ function findFunctionEnd(code: string): number {
   return code.length;
 }
 
-interface WebAppResponse {
+export interface WebAppResponse {
   success: boolean;
   result?: unknown;
   error?: string;
   logs?: Array<{ t: string; m: string }>;
 }
 
+/**
+ * Call a Google Apps Script web app endpoint.
+ *
+ * Sends the owner's OAuth token as a Bearer header so the call is
+ * authenticated even before the owner has completed the one-time browser
+ * authorization of the script project.  The web app manifest uses
+ * `executeAs: USER_DEPLOYING` + `access: ANYONE_ANONYMOUS`, so anonymous
+ * calls also work after the initial browser authorization is done.
+ */
 export async function callWebApp(
   webAppUrl: string,
   fn: string,
   params: Record<string, unknown>,
 ): Promise<WebAppResponse> {
+  const token = await getAccessToken();
+
   const res = await fetch(webAppUrl, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
     body: JSON.stringify({ _fn: fn, _params: params }),
     signal: AbortSignal.timeout(EXECUTION_TIMEOUT_MS),
   });
+
+  // Google Apps Script web apps return an HTML login/auth page (with status
+  // 200 or 403) when the script project hasn't been authorized by the owner
+  // yet.  Detect this before attempting JSON.parse so callers get a clear
+  // WEB_APP_AUTH_REQUIRED error instead of a SyntaxError.
+  const contentType = res.headers.get('content-type') ?? '';
+  if (contentType.includes('text/html')) {
+    throw new McpError(
+      ErrorCode.InternalError,
+      `WEB_APP_AUTH_REQUIRED: ${res.status}`,
+    );
+  }
+
   if (!res.ok) {
     throw new McpError(
       ErrorCode.InternalError,

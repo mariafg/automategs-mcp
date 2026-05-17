@@ -114,9 +114,7 @@ export const handlers: Record<
     });
   },
 
-  activate_automation: async (args, ctx) => {
-    requireTier(ctx.tier, 'pro', 'Activation');
-
+  activate_automation: async (args, _ctx) => {
     const projectId = args.projectId as string;
     const functionName = args.functionName as string;
 

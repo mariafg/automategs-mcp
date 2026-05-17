@@ -29,6 +29,11 @@ function doPost(e) {
   }
 }
 
+function doGet(e) {
+  var html = '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AutomateGS — Authorized</title><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f5f3ff;min-height:100vh;display:flex;align-items:center;justify-content:center}.card{background:#fff;border-radius:16px;padding:48px 56px;box-shadow:0 4px 24px rgba(79,70,229,.10);text-align:center;max-width:420px;width:90%}.icon{font-size:52px;margin-bottom:20px}.badge{display:inline-block;background:#ede9fe;color:#4f46e5;font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;padding:4px 12px;border-radius:99px;margin-bottom:16px}h1{font-size:22px;font-weight:700;color:#111;margin-bottom:10px}p{color:#6b7280;font-size:15px;line-height:1.6}</style></head><body><div class="card"><div class="icon">⚡</div><div class="badge">AutomateGS</div><h1>Connected to Google</h1><p>Your automation is authorized and ready to run.<br>You can close this tab and return to Claude.</p></div></body></html>';
+  return HtmlService.createHtmlOutput(html).setTitle('AutomateGS — Authorized');
+}
+
 function _agsJsonResponse(data) {
   return ContentService.createTextOutput(JSON.stringify(data))
     .setMimeType(ContentService.MimeType.JSON);

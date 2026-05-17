@@ -61,8 +61,6 @@ export const handlers: Record<
   (args: Record<string, unknown>, ctx: ToolContext) => Promise<ToolResult>
 > = {
   schedule_automation: async (args, ctx) => {
-    requireTier(ctx.tier, 'pro', 'Scheduling');
-
     const projectId = args.projectId as string;
     const functionName = args.functionName as string;
     const scheduleType = args.scheduleType as string;
@@ -73,14 +71,15 @@ export const handlers: Record<
     const project = registry.projects[projectId];
     if (!project) throw new McpError(ErrorCode.InvalidRequest, `Project "${projectId}" not found.`);
 
-    const fn = project.functions.find((f) => f.fnName === functionName);
-    if (!fn) throw new McpError(ErrorCode.InvalidRequest, `Function "${functionName}" not found in project "${projectId}".`);
-    if (fn.status !== 'crystallised') {
+    // Free tier: max 1 trigger per project. Pro/Agency: unlimited.
+    if (ctx.tier === 'free' && project.triggers.length >= 1) {
       throw new McpError(
         ErrorCode.InvalidRequest,
-        `Function "${functionName}" must be active (crystallised) before scheduling. Current status: ${fn.status}.`,
+        'Free tier allows 1 scheduled trigger per project. Upgrade to Pro for unlimited scheduling.',
       );
     }
+    const fn = project.functions.find((f) => f.fnName === functionName);
+    if (!fn) throw new McpError(ErrorCode.InvalidRequest, `Function "${functionName}" not found in project "${projectId}".`);
     if (!project.webAppUrl) {
       throw new McpError(ErrorCode.InvalidRequest, 'Project has no web app URL.');
     }
@@ -126,8 +125,7 @@ export const handlers: Record<
     });
   },
 
-  unschedule_automation: async (args, ctx) => {
-    requireTier(ctx.tier, 'pro', 'Scheduling');
+  unschedule_automation: async (args, _ctx) => {
 
     const projectId = args.projectId as string;
     const functionName = args.functionName as string;

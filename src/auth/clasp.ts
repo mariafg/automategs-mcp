@@ -1,9 +1,77 @@
 import fs from 'fs';
 import http from 'http';
-import { spawn } from 'child_process';
+import { spawn, execFile } from 'child_process';
+import { join } from 'path';
 import open from 'open';
 import { CLASPRC_PATH, CLASP_CLIENT_ID, CLASP_CLIENT_SECRET } from '../utils/constants.js';
 import { findAvailablePort } from '../utils/port.js';
+
+// ---------------------------------------------------------------------------
+// npx resolver — DXT/Electron runs with a restricted PATH that omits the
+// user's Node.js installation.  We search real locations to find npx.
+// ---------------------------------------------------------------------------
+let _resolvedNpx: string | null = null;
+
+async function resolveNpx(): Promise<string> {
+  if (_resolvedNpx) return _resolvedNpx;
+
+  const home = process.env.HOME ?? `/Users/${process.env.USER ?? ''}`;
+  const shell = process.env.SHELL ?? '/bin/zsh';
+
+  // 1. Ask the user's login shell — picks up nvm/fnm/volta PATH modifications.
+  //    zsh/bash -l loads .zprofile / .bash_profile where nvm is often initialised.
+  try {
+    const found = await new Promise<string>((res, rej) => {
+      execFile(
+        shell,
+        ['-l', '-c', 'which npx 2>/dev/null || command -v npx 2>/dev/null'],
+        { timeout: 8_000 },
+        (_err, stdout) => {
+          const p = stdout.trim().split('\n')[0];
+          if (p) res(p); else rej(new Error('empty'));
+        },
+      );
+    });
+    if (found && fs.existsSync(found)) {
+      _resolvedNpx = found;
+      return found;
+    }
+  } catch { /* fall through */ }
+
+  // 2. Scan ~/.nvm/versions/node (sorted newest-first).
+  const nvmDir = process.env.NVM_DIR ?? join(home, '.nvm');
+  const nvmNodes = join(nvmDir, 'versions', 'node');
+  if (fs.existsSync(nvmNodes)) {
+    try {
+      const versions = fs.readdirSync(nvmNodes).sort().reverse();
+      for (const v of versions) {
+        const candidate = join(nvmNodes, v, 'bin', 'npx');
+        if (fs.existsSync(candidate)) {
+          _resolvedNpx = candidate;
+          return candidate;
+        }
+      }
+    } catch { /* fall through */ }
+  }
+
+  // 3. Static fallbacks (Homebrew, system).
+  const statics = [
+    '/opt/homebrew/bin/npx',
+    '/usr/local/bin/npx',
+    '/usr/bin/npx',
+  ];
+  for (const p of statics) {
+    if (fs.existsSync(p)) {
+      _resolvedNpx = p;
+      return p;
+    }
+  }
+
+  throw new Error(
+    'Cannot find npx. Make sure Node.js is installed and npx is in your PATH. ' +
+    `Searched login shell (${shell}), ${nvmNodes}, and common system paths.`,
+  );
+}
 
 interface ClaspToken {
   access_token: string;
@@ -82,8 +150,12 @@ export async function getAccessToken(): Promise<string> {
  * starts a local HTTP server to receive the callback,
  * exchanges the code for tokens, and writes ~/.clasprc.json.
  * Never touches stdin/stdout — safe for use inside an MCP stdio process.
+ *
+ * @param onUrl  Optional callback fired with the auth URL as soon as the
+ *               callback server is ready.  Use this to surface the URL in
+ *               tool responses when the browser cannot open automatically.
  */
-export async function runClaspLoginBrowser(): Promise<void> {
+export async function runClaspLoginBrowser(onUrl?: (url: string) => void): Promise<void> {
   const port = await findAvailablePort();
   const redirectUri = `http://localhost:${port}`;
 
@@ -127,12 +199,39 @@ export async function runClaspLoginBrowser(): Promise<void> {
     srv.on('error', (err) => { clearTimeout(timeout); reject(err); });
 
     srv.listen(port, 'localhost', () => {
+      const urlStr = authUrl.toString();
       console.error(`[AutomateGS] OAuth callback server listening on port ${port}`);
-      // Open browser — errors are non-fatal (user can copy the URL from stderr)
-      open(authUrl.toString()).catch(() => {
-        console.error(`[AutomateGS] Could not open browser automatically.`);
-        console.error(`[AutomateGS] Open this URL manually: ${authUrl.toString()}`);
-      });
+      console.error(`[AutomateGS] Auth URL: ${urlStr}`);
+
+      // Notify the caller so it can surface the URL in tool responses.
+      if (onUrl) onUrl(urlStr);
+
+      // Try to open the browser.  In DXT/Electron environments the PATH may
+      // not include the directories where `open` (macOS) or `xdg-open` (Linux)
+      // live, so we try the absolute path first and fall back to the `open`
+      // package as a second attempt.
+      const tryOpen = (cmd: string, args: string[]) =>
+        new Promise<void>((res) => execFile(cmd, args, () => res()));
+
+      const platform = process.platform;
+      const openFns: Array<() => Promise<void>> = platform === 'darwin'
+        ? [
+            () => tryOpen('/usr/bin/open', [urlStr]),
+            () => open(urlStr),
+          ]
+        : platform === 'linux'
+          ? [
+              () => tryOpen('/usr/bin/xdg-open', [urlStr]),
+              () => open(urlStr),
+            ]
+          : [() => open(urlStr)];
+
+      (async () => {
+        for (const fn of openFns) {
+          try { await fn(); return; } catch { /* try next */ }
+        }
+        console.error(`[AutomateGS] Could not open browser automatically. Open manually: ${urlStr}`);
+      })();
     });
   });
 
@@ -194,40 +293,60 @@ export async function testClaspConnection(): Promise<
   }
 }
 
-export async function runClasp(args: string[], cwd: string): Promise<string> {
+/**
+ * Spawn a clasp command.
+ *
+ * Strategy (tried in order):
+ *  1. Login shell `clasp` — works when clasp is globally installed and the
+ *     user's shell profile (nvm/fnm) adds the right bin dir to PATH.
+ *  2. Login shell `npx clasp` — auto-installs clasp on demand if it isn't
+ *     present.  npx is resolved via the same login shell so nvm is active.
+ *
+ * Both run through the user's login shell (`-l`) so that nvm/fnm
+ * initialisations in .zprofile / .bash_profile are respected.
+ */
+async function spawnViaShell(cmd: string, cwd: string): Promise<string> {
+  const shell = process.env.SHELL ?? '/bin/zsh';
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     const errChunks: Buffer[] = [];
-
-    const proc = spawn('npx', ['clasp', ...args], { cwd });
-
-    proc.stdout.on('data', (chunk: Buffer) => chunks.push(chunk));
-    proc.stderr.on('data', (chunk: Buffer) => errChunks.push(chunk));
-
-    const timer = setTimeout(() => {
-      proc.kill();
-      reject(new Error('clasp command timed out after 60 seconds'));
-    }, 60_000);
-
+    const proc = spawn(shell, ['-l', '-c', cmd], { cwd, stdio: 'pipe' });
+    proc.stdout.on('data', (c: Buffer) => chunks.push(c));
+    proc.stderr.on('data', (c: Buffer) => errChunks.push(c));
+    const timer = setTimeout(() => { proc.kill(); reject(new Error('clasp command timed out after 60 seconds')); }, 60_000);
     proc.on('close', (code) => {
       clearTimeout(timer);
-      if (code === 0) {
-        resolve(Buffer.concat(chunks).toString('utf8'));
-      } else {
-        reject(
-          new Error(
-            Buffer.concat(errChunks).toString('utf8') ||
-              `clasp exited with code ${code}`,
-          ),
-        );
-      }
+      if (code === 0) resolve(Buffer.concat(chunks).toString('utf8'));
+      else reject(new Error(Buffer.concat(errChunks).toString('utf8') || `clasp exited with code ${code}`));
     });
-
-    proc.on('error', (err) => {
-      clearTimeout(timer);
-      reject(err);
-    });
+    proc.on('error', (err) => { clearTimeout(timer); reject(err); });
   });
+}
+
+export async function runClasp(args: string[], cwd: string): Promise<string> {
+  // Shell-escape each argument with single quotes.
+  const shellEscapedArgs = args
+    .map((a) => `'${a.replace(/'/g, "'\\''")}'`)
+    .join(' ');
+
+  // Try globally-installed clasp first.
+  try {
+    return await spawnViaShell(`clasp ${shellEscapedArgs}`, cwd);
+  } catch (err) {
+    const msg = String(err);
+    // Only fall through to npx if clasp simply wasn't found — not for auth
+    // errors, API errors, etc.
+    const notFound =
+      msg.includes('command not found') ||
+      msg.includes('ENOENT') ||
+      msg.includes('No such file') ||
+      msg.includes('not found');
+    if (!notFound) throw err;
+    console.error('[AutomateGS] clasp not found globally — falling back to npx clasp (will auto-install)');
+  }
+
+  // Fall back: let npx download + run clasp on demand.
+  return spawnViaShell(`npx --yes clasp ${shellEscapedArgs}`, cwd);
 }
 
 // ---------------------------------------------------------------------------

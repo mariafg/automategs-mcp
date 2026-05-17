@@ -3,16 +3,42 @@
 // executable statement so it takes effect even if later async code is slow.
 process.stdin.resume();
 
+// File-based debug logger — writes to /tmp so it's visible even when the DXT
+// runner doesn't forward stderr to the MCP log.
+import fs from 'fs';
+const _dbg = (msg: string) => {
+  try { fs.appendFileSync('/tmp/automategs-debug.log', `${new Date().toISOString()} ${msg}\n`); } catch {}
+};
+_dbg(`PROCESS START pid=${process.pid}`);
+
 // Catch any unhandled async errors that would otherwise kill the process
 // silently.  Log them to stderr (visible in MCP logs) and keep running.
 process.on('unhandledRejection', (reason: unknown) => {
+  const msg = reason instanceof Error ? reason.stack ?? String(reason) : String(reason);
   console.error('[AutomateGS] UNHANDLED REJECTION — this is a bug, please report it');
-  console.error(reason instanceof Error ? reason.stack ?? String(reason) : String(reason));
+  console.error(msg);
+  _dbg(`UNHANDLED_REJECTION ${msg}`);
 });
 
 process.on('uncaughtException', (err: Error) => {
+  const msg = err.stack ?? String(err);
   console.error('[AutomateGS] UNCAUGHT EXCEPTION — this is a bug, please report it');
-  console.error(err.stack ?? String(err));
+  console.error(msg);
+  _dbg(`UNCAUGHT_EXCEPTION ${msg}`);
+});
+
+process.on('exit', (code) => {
+  _dbg(`PROCESS EXIT code=${code}`);
+});
+
+process.on('SIGTERM', () => {
+  _dbg('SIGTERM received');
+  process.exit(0);
+});
+
+process.on('SIGINT', () => {
+  _dbg('SIGINT received');
+  process.exit(0);
 });
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
@@ -23,7 +49,6 @@ import {
   McpError,
   ErrorCode,
 } from '@modelcontextprotocol/sdk/types.js';
-import fs from 'fs';
 import { resolveTier } from './auth/license.js';
 import { isClaspAuthenticated, runClaspLoginBrowser, testClaspConnection } from './auth/clasp.js';
 import { loadRegistry, saveRegistry } from './registry/projects.js';
@@ -71,6 +96,10 @@ type StartupState = 'pending' | 'authenticating' | 'auth_required' | 'api_disabl
 let startupState: StartupState = 'pending';
 let startupMessage = '';
 let currentTier: Tier = 'free';
+// Stores the Google OAuth URL while waiting for the user to sign in.
+// Surfaced in tool responses so the user can click the link even if the
+// browser didn't open automatically (common in DXT / Electron environments).
+let pendingAuthUrl: string | null = null;
 
 // ---------------------------------------------------------------------------
 // Collect tools and handlers
@@ -137,7 +166,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     return {
       content: [{ type: 'text', text: JSON.stringify({
         status: 'authenticating',
-        message: 'A Google sign-in tab just opened in your browser. Complete the sign-in there, then try again.',
+        message: pendingAuthUrl
+          ? `AutomateGS needs to connect to your Google account. Please open this URL in your browser to sign in:\n\n${pendingAuthUrl}\n\nOnce you complete sign-in, try your request again.`
+          : 'A Google sign-in tab is opening in your browser. Complete the sign-in there, then try again.',
+        auth_url: pendingAuthUrl,
       }) }],
     };
   }
@@ -189,50 +221,74 @@ const transport = new StdioServerTransport();
 await server.connect(transport);
 console.error(`[AutomateGS]       Transport connected — MCP handshake ready`);
 
+// Debug: log if stdin closes unexpectedly so we can diagnose crashes in
+// DXT environments where stderr is not forwarded to the MCP log.
+process.stdin.once('end', () => {
+  try { fs.appendFileSync('/tmp/automategs-debug.log', `${new Date().toISOString()} stdin EOF\n`); } catch {}
+});
+process.stdin.once('close', () => {
+  try { fs.appendFileSync('/tmp/automategs-debug.log', `${new Date().toISOString()} stdin CLOSE\n`); } catch {}
+});
+
 // ---------------------------------------------------------------------------
 // Background initialisation
 // ---------------------------------------------------------------------------
 console.error(`[AutomateGS] [5/6] Starting background initialisation…`);
 
 (async () => {
+  _dbg('IIFE start');
   try {
     // License
+    _dbg('license start');
     console.error(`[AutomateGS]       Resolving license tier…`);
     currentTier = await resolveTier(process.env.LICENSE_KEY);
+    _dbg(`license done tier=${currentTier}`);
     console.error(`[AutomateGS]       Tier: ${currentTier}`);
 
     // Clasp auth
+    _dbg('clasp auth check');
     console.error(`[AutomateGS]       Checking clasp authentication…`);
     const authed = isClaspAuthenticated();
+    _dbg(`clasp authed=${authed}`);
     console.error(`[AutomateGS]       isClaspAuthenticated = ${authed}`);
 
     if (!authed) {
       startupState = 'authenticating';
       console.error(`[AutomateGS]       Opening Google sign-in in browser…`);
       try {
-        await runClaspLoginBrowser();
+        await runClaspLoginBrowser((url) => {
+          pendingAuthUrl = url;
+          _dbg(`auth_url ready: ${url}`);
+          console.error(`[AutomateGS]       Auth URL: ${url}`);
+        });
+        pendingAuthUrl = null;
         console.error(`[AutomateGS]       Google authentication complete`);
       } catch (err) {
         startupState = 'auth_required';
         startupMessage = `Google sign-in failed: ${String(err)}`;
         console.error(`[AutomateGS]       ${startupMessage}`);
+        _dbg(`auth_required: ${startupMessage}`);
         return;
       }
     }
 
     // Clasp API connectivity
+    _dbg('clasp connection test start');
     console.error(`[AutomateGS]       Testing Apps Script API connectivity…`);
     const claspStatus = await testClaspConnection();
+    _dbg(`clasp connection test done status=${claspStatus}`);
     console.error(`[AutomateGS]       Clasp status: ${claspStatus}`);
 
     if (claspStatus === 'api_disabled') {
       startupState = 'api_disabled';
       startupMessage = `Apps Script API not enabled. Visit ${APPS_SCRIPT_SETTINGS_URL} to enable it.`;
       console.error(`[AutomateGS]       ${startupMessage}`);
+      _dbg(`api_disabled`);
       return;
     }
 
     // Registry
+    _dbg('registry load start');
     console.error(`[AutomateGS]       Loading registry…`);
     const registry = loadRegistry();
     registry.tier = currentTier;
@@ -241,13 +297,17 @@ console.error(`[AutomateGS] [5/6] Starting background initialisation…`);
     console.error(`[AutomateGS]       Registry loaded — ${projectCount} automation(s), ${registry.totalExecutions} execution(s)`);
 
     startupState = 'ready';
+    _dbg(`READY tier=${currentTier} automations=${projectCount}`);
     console.error(`[AutomateGS] [6/6] ✓ Ready | v${VERSION} | tier: ${currentTier} | automations: ${projectCount}`);
   } catch (err) {
     startupState = 'error';
     startupMessage = String(err);
+    const errStack = err instanceof Error ? err.stack ?? String(err) : String(err);
     console.error(`[AutomateGS]       STARTUP ERROR: ${startupMessage}`);
     if (err instanceof Error && err.stack) {
       console.error(err.stack);
     }
+    _dbg(`IIFE ERROR: ${errStack}`);
   }
+  _dbg('IIFE complete');
 })();
