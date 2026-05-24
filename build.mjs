@@ -38,11 +38,14 @@ console.log('esbuild bundle complete');
 // 3. Obfuscate — string array only.
 //    controlFlowFlattening and deadCodeInjection both restructure async/await
 //    into switch-state machines that break Promise chains in Node.js MCP servers.
+//    rc4 encoding removed: RC4 key-scheduling runs a 256-step init loop per encoded
+//    string, which is too slow in Electron's V8 context — Claude Desktop kills the
+//    process before initialize can respond. base64 decodes in O(n), startup is instant.
 const code = readFileSync(join(__dirname, 'dist/index.js'), 'utf8');
 const obfuscated = JavaScriptObfuscator.obfuscate(code, {
   compact: true,
   stringArray: true,
-  stringArrayEncoding: ['rc4'],
+  stringArrayEncoding: ['base64'],
   stringArrayThreshold: 0.75,
   controlFlowFlattening: false,
   deadCodeInjection: false,
