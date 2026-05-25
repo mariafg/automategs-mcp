@@ -52,6 +52,13 @@ await esbuild.build({
 
 console.log('clasp-cli bundle complete');
 
+// 2c. Write a no-op git stub so clasp never triggers the macOS
+//     "Install Xcode Command Line Tools" dialog (which blocks the process).
+//     We prepend dist/ to PATH when spawning clasp so this stub wins.
+writeFileSync(join(__dirname, 'dist/git'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+writeFileSync(join(__dirname, 'dist/git.cmd'), '@echo off\r\nexit 0\r\n');
+console.log('git stub written');
+
 // 3. Obfuscate — string array only.
 //    controlFlowFlattening and deadCodeInjection both restructure async/await
 //    into switch-state machines that break Promise chains in Node.js MCP servers.

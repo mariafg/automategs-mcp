@@ -237,11 +237,19 @@ export async function runClasp(args: string[], cwd: string): Promise<string> {
     const chunks: Buffer[] = [];
     const errChunks: Buffer[] = [];
 
-    // stdin must be 'ignore' (not 'pipe') — otherwise clasp blocks waiting
-    // for input that never arrives, causing a 60-second timeout.
+    // stdin:'ignore' — clasp would block waiting for input that never arrives.
+    // PATH prepend — dist/ contains a no-op git stub so clasp never triggers
+    // the macOS "Install Xcode Command Line Tools" dialog, which blocks the
+    // process until the user dismisses it.
+    const distDir = dirname(CLASP_CLI_PATH);
+    const env = {
+      ...process.env,
+      PATH: distDir + (process.platform === 'win32' ? ';' : ':') + (process.env.PATH ?? ''),
+    };
     const proc = spawn(process.execPath, [CLASP_CLI_PATH, ...args], {
       cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
+      env,
     });
 
     proc.stdout.on('data', (c: Buffer) => chunks.push(c));
