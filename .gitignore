@@ -4,3 +4,6 @@ node_modules/
 .clasp.json
 *.env
 projects.json
+*.mcpb
+.DS_Store
+.claude/
