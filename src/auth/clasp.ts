@@ -237,24 +237,33 @@ export async function runClasp(args: string[], cwd: string): Promise<string> {
     const chunks: Buffer[] = [];
     const errChunks: Buffer[] = [];
 
-    // Restrict PATH to node's own bin directory only. Clasp is a pure Node.js
-    // bundle and needs no external shell tools. This prevents /usr/bin/git from
-    // being found — on Macs without Xcode CLI tools, any git call triggers a
-    // blocking "Install Developer Tools" dialog instead of returning an error,
-    // which causes a 60-second timeout.
-    const nodeBinDir = dirname(process.execPath);
+    // Empty PATH so no shell tools (especially /usr/bin/git) can be found.
+    // Clasp is a pure Node.js bundle and needs no external binaries.
+    // On Macs without Xcode CLI tools, /usr/bin/git triggers a blocking
+    // "Install Developer Tools" dialog instead of failing with ENOENT.
     const env = {
       ...process.env,
-      PATH: nodeBinDir,
+      PATH: '',
+      GIT_TERMINAL_PROMPT: '0',
+      GIT_EXEC_PATH: '/nonexistent',
     };
+
+    console.error(`[AutomateGS] runClasp: ${args.join(' ')} (cwd: ${cwd})`);
+
     const proc = spawn(process.execPath, [CLASP_CLI_PATH, ...args], {
       cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
       env,
     });
 
-    proc.stdout.on('data', (c: Buffer) => chunks.push(c));
-    proc.stderr.on('data', (c: Buffer) => errChunks.push(c));
+    proc.stdout.on('data', (c: Buffer) => {
+      chunks.push(c);
+      console.error(`[AutomateGS] clasp stdout: ${c.toString().trim()}`);
+    });
+    proc.stderr.on('data', (c: Buffer) => {
+      errChunks.push(c);
+      console.error(`[AutomateGS] clasp stderr: ${c.toString().trim()}`);
+    });
 
     const timer = setTimeout(() => {
       proc.kill();
@@ -263,6 +272,7 @@ export async function runClasp(args: string[], cwd: string): Promise<string> {
 
     proc.on('close', (code) => {
       clearTimeout(timer);
+      console.error(`[AutomateGS] clasp exit code: ${code}`);
       if (code === 0) resolve(Buffer.concat(chunks).toString('utf8'));
       else reject(new Error(Buffer.concat(errChunks).toString('utf8') || `clasp exited with code ${code}`));
     });
