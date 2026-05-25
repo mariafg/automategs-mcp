@@ -96,10 +96,14 @@ type StartupState = 'pending' | 'authenticating' | 'auth_required' | 'api_disabl
 let startupState: StartupState = 'pending';
 let startupMessage = '';
 let currentTier: Tier = 'free';
-// Stores the Google OAuth URL while waiting for the user to sign in.
-// Surfaced in tool responses so the user can click the link even if the
-// browser didn't open automatically (common in DXT / Electron environments).
 let pendingAuthUrl: string | null = null;
+
+// Resolves as soon as startupState leaves 'pending' (auth check done).
+// Tool calls await this so they don't fire back an error during the first
+// 1-2 seconds of init — eliminating the spurious "Failed to call tool" UI flash.
+let _startupResolve: () => void;
+const startupSettled = new Promise<void>(resolve => { _startupResolve = resolve; });
+function settleStartup() { try { _startupResolve(); } catch {} }
 
 // ---------------------------------------------------------------------------
 // Collect tools and handlers
@@ -154,12 +158,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const claspFreeTools = new Set(['list_automations', 'list_templates', 'check_status']);
 
   if (startupState === 'pending' && !claspFreeTools.has(name)) {
-    return {
-      content: [{ type: 'text', text: JSON.stringify({
-        status: 'initializing',
-        message: 'AutomateGS is still starting up. Please wait a moment and try again.',
-      }) }],
-    };
+    // Wait up to 15 s for init to finish — covers the normal 1-2 s startup
+    // without triggering the "Failed to call tool" flash in Claude Desktop.
+    await Promise.race([startupSettled, new Promise(r => setTimeout(r, 15_000))]);
   }
 
   if (startupState === 'authenticating') {
@@ -254,6 +255,7 @@ console.error(`[AutomateGS] [5/6] Starting background initialisation…`);
 
     if (!authed) {
       startupState = 'authenticating';
+      settleStartup();
       console.error(`[AutomateGS]       Opening Google sign-in in browser…`);
       try {
         await runClaspLoginBrowser((url) => {
@@ -281,6 +283,7 @@ console.error(`[AutomateGS] [5/6] Starting background initialisation…`);
 
     if (claspStatus === 'api_disabled') {
       startupState = 'api_disabled';
+      settleStartup();
       startupMessage = `Apps Script API not enabled. Visit ${APPS_SCRIPT_SETTINGS_URL} to enable it.`;
       console.error(`[AutomateGS]       ${startupMessage}`);
       _dbg(`api_disabled`);
@@ -297,10 +300,12 @@ console.error(`[AutomateGS] [5/6] Starting background initialisation…`);
     console.error(`[AutomateGS]       Registry loaded — ${projectCount} automation(s), ${registry.totalExecutions} execution(s)`);
 
     startupState = 'ready';
+    settleStartup();
     _dbg(`READY tier=${currentTier} automations=${projectCount}`);
     console.error(`[AutomateGS] [6/6] ✓ Ready | v${VERSION} | tier: ${currentTier} | automations: ${projectCount}`);
   } catch (err) {
     startupState = 'error';
+    settleStartup();
     startupMessage = String(err);
     const errStack = err instanceof Error ? err.stack ?? String(err) : String(err);
     console.error(`[AutomateGS]       STARTUP ERROR: ${startupMessage}`);
