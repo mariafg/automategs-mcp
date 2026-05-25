@@ -237,7 +237,12 @@ export async function runClasp(args: string[], cwd: string): Promise<string> {
     const chunks: Buffer[] = [];
     const errChunks: Buffer[] = [];
 
-    const proc = spawn(process.execPath, [CLASP_CLI_PATH, ...args], { cwd, stdio: 'pipe' });
+    // stdin must be 'ignore' (not 'pipe') — otherwise clasp blocks waiting
+    // for input that never arrives, causing a 60-second timeout.
+    const proc = spawn(process.execPath, [CLASP_CLI_PATH, ...args], {
+      cwd,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
 
     proc.stdout.on('data', (c: Buffer) => chunks.push(c));
     proc.stderr.on('data', (c: Buffer) => errChunks.push(c));
