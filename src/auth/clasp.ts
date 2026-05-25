@@ -12,6 +12,11 @@ import { findAvailablePort } from '../utils/port.js';
 // so no system PATH or npx is required.
 const CLASP_CLI_PATH = join(dirname(fileURLToPath(import.meta.url)), 'clasp-cli.js');
 
+const DBG_LOG = '/tmp/automategs-debug.log';
+function dbg(msg: string): void {
+  try { fs.appendFileSync(DBG_LOG, `${new Date().toISOString()} [clasp] ${msg}\n`); } catch {}
+}
+
 interface ClaspToken {
   access_token: string;
   refresh_token: string;
@@ -237,10 +242,6 @@ export async function runClasp(args: string[], cwd: string): Promise<string> {
     const chunks: Buffer[] = [];
     const errChunks: Buffer[] = [];
 
-    // Empty PATH so no shell tools (especially /usr/bin/git) can be found.
-    // Clasp is a pure Node.js bundle and needs no external binaries.
-    // On Macs without Xcode CLI tools, /usr/bin/git triggers a blocking
-    // "Install Developer Tools" dialog instead of failing with ENOENT.
     const env = {
       ...process.env,
       PATH: '',
@@ -248,7 +249,9 @@ export async function runClasp(args: string[], cwd: string): Promise<string> {
       GIT_EXEC_PATH: '/nonexistent',
     };
 
-    console.error(`[AutomateGS] runClasp: ${args.join(' ')} (cwd: ${cwd})`);
+    dbg(`runClasp START: node=${process.execPath} clasp=${CLASP_CLI_PATH}`);
+    dbg(`runClasp CMD: ${args.join(' ')} cwd=${cwd}`);
+    dbg(`runClasp ENV.PATH="${env.PATH}" HOME="${env.HOME}"`);
 
     const proc = spawn(process.execPath, [CLASP_CLI_PATH, ...args], {
       cwd,
@@ -256,28 +259,36 @@ export async function runClasp(args: string[], cwd: string): Promise<string> {
       env,
     });
 
+    dbg(`runClasp pid=${proc.pid}`);
+
     proc.stdout.on('data', (c: Buffer) => {
       chunks.push(c);
-      console.error(`[AutomateGS] clasp stdout: ${c.toString().trim()}`);
+      dbg(`stdout: ${c.toString().trim()}`);
     });
     proc.stderr.on('data', (c: Buffer) => {
       errChunks.push(c);
-      console.error(`[AutomateGS] clasp stderr: ${c.toString().trim()}`);
+      dbg(`stderr: ${c.toString().trim()}`);
     });
 
     const timer = setTimeout(() => {
+      dbg(`TIMEOUT after 60s — stdout so far: ${Buffer.concat(chunks).toString().slice(0, 500)}`);
+      dbg(`TIMEOUT stderr so far: ${Buffer.concat(errChunks).toString().slice(0, 500)}`);
       proc.kill();
       reject(new Error('clasp command timed out after 60 seconds'));
     }, 60_000);
 
     proc.on('close', (code) => {
       clearTimeout(timer);
-      console.error(`[AutomateGS] clasp exit code: ${code}`);
+      dbg(`runClasp EXIT code=${code}`);
       if (code === 0) resolve(Buffer.concat(chunks).toString('utf8'));
       else reject(new Error(Buffer.concat(errChunks).toString('utf8') || `clasp exited with code ${code}`));
     });
 
-    proc.on('error', (err) => { clearTimeout(timer); reject(err); });
+    proc.on('error', (err) => {
+      dbg(`runClasp ERROR: ${err.message}`);
+      clearTimeout(timer);
+      reject(err);
+    });
   });
 }
 

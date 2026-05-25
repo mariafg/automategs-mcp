@@ -9,7 +9,14 @@ import fs from 'fs';
 const _dbg = (msg: string) => {
   try { fs.appendFileSync('/tmp/automategs-debug.log', `${new Date().toISOString()} ${msg}\n`); } catch {}
 };
-_dbg(`PROCESS START pid=${process.pid}`);
+_dbg(`PROCESS START pid=${process.pid} node=${process.execPath}`);
+// Build version is injected at compile time — log it immediately so the
+// debug file always shows which .mcpb is installed.
+declare const __PKG_VERSION__: string;
+declare const __BUILD_TIME__: string;
+const _VERSION = typeof __PKG_VERSION__ !== 'undefined' ? __PKG_VERSION__ : 'dev';
+const _BUILD_TIME = typeof __BUILD_TIME__ !== 'undefined' ? __BUILD_TIME__ : 'unknown';
+_dbg(`BUILD v${_VERSION} built=${_BUILD_TIME}`);
 
 // Catch any unhandled async errors that would otherwise kill the process
 // silently.  Log them to stderr (visible in MCP logs) and keep running.
