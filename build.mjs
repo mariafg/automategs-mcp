@@ -35,6 +35,23 @@ await esbuild.build({
 
 console.log('esbuild bundle complete');
 
+// 2b. Bundle clasp CLI as a sibling script — used at runtime via
+//     spawn(process.execPath, [claspCliPath, ...args]) so npx is not required.
+await esbuild.build({
+  entryPoints: ['node_modules/@google/clasp/build/src/index.js'],
+  bundle: true,
+  platform: 'node',
+  target: 'node20',
+  outfile: 'dist/clasp-cli.js',
+  format: 'esm',
+  external: [],
+  banner: {
+    js: "import { createRequire } from 'module'; const require = createRequire(import.meta.url);",
+  },
+});
+
+console.log('clasp-cli bundle complete');
+
 // 3. Obfuscate — string array only.
 //    controlFlowFlattening and deadCodeInjection both restructure async/await
 //    into switch-state machines that break Promise chains in Node.js MCP servers.

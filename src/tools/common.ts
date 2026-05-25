@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
-import { execFile } from 'child_process';
 import { McpError, ErrorCode } from '@modelcontextprotocol/sdk/types.js';
+import open from 'open';
 import { runClasp, getAccessToken } from '../auth/clasp.js';
 import { SCRIPTS_DIR, EXECUTION_TIMEOUT_MS } from '../utils/constants.js';
 import { buildScriptCode, buildAppsScriptManifest, DEFAULT_SCOPES } from '../gas/template.js';
@@ -138,12 +138,10 @@ export async function finishProjectSetup(
   // owner can complete the one-time Google script-project authorization.
   // Without this step Google returns 403 when the web app tries to execute
   // on the owner's behalf.  Best-effort — don't block on failure.
-  try {
-    execFile('/usr/bin/open', [webAppUrl]);
-    console.error(`[AutomateGS] Opened browser for web app authorization: ${webAppUrl}`);
-  } catch {
+  open(webAppUrl).catch(() => {
     console.error(`[AutomateGS] Could not auto-open browser. Please visit: ${webAppUrl}`);
-  }
+  });
+  console.error(`[AutomateGS] Opened browser for web app authorization: ${webAppUrl}`);
 
   return { scriptId, webAppUrl, localPath, deploymentId };
 }
