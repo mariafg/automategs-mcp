@@ -237,14 +237,15 @@ export async function runClasp(args: string[], cwd: string): Promise<string> {
     const chunks: Buffer[] = [];
     const errChunks: Buffer[] = [];
 
-    // stdin:'ignore' — clasp would block waiting for input that never arrives.
-    // PATH prepend — dist/ contains a no-op git stub so clasp never triggers
-    // the macOS "Install Xcode Command Line Tools" dialog, which blocks the
-    // process until the user dismisses it.
-    const distDir = dirname(CLASP_CLI_PATH);
+    // Restrict PATH to node's own bin directory only. Clasp is a pure Node.js
+    // bundle and needs no external shell tools. This prevents /usr/bin/git from
+    // being found — on Macs without Xcode CLI tools, any git call triggers a
+    // blocking "Install Developer Tools" dialog instead of returning an error,
+    // which causes a 60-second timeout.
+    const nodeBinDir = dirname(process.execPath);
     const env = {
       ...process.env,
-      PATH: distDir + (process.platform === 'win32' ? ';' : ':') + (process.env.PATH ?? ''),
+      PATH: nodeBinDir,
     };
     const proc = spawn(process.execPath, [CLASP_CLI_PATH, ...args], {
       cwd,
