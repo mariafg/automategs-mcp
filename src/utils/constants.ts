@@ -39,6 +39,6 @@ export const EXECUTION_TIMEOUT_MS = 5 * 60 * 1000;
 
 export const CLASP_CLIENT_ID =
   '1072944905499-vm2v2i5dvn0a0d2o4ca36i1vge8cvbn0.apps.googleusercontent.com';
-export const CLASP_CLIENT_SECRET = 'v6V3fEr_8QfZnFounce7Chty';
+export const CLASP_CLIENT_SECRET = 'v6V3fKV_zWU7iw1DrpO1rknX';
 
 export const UPGRADE_URL = 'https://thedatastudents.com/automategs';
