@@ -1,20 +1,95 @@
 import fs from 'fs';
 import http from 'http';
-import { spawn } from 'child_process';
-import { dirname, join } from 'path';
+import { spawn, execFile } from 'child_process';
+import { dirname, join, basename } from 'path';
 import { fileURLToPath } from 'url';
 import open from 'open';
 import { CLASPRC_PATH, CLASP_CLIENT_ID, CLASP_CLIENT_SECRET } from '../utils/constants.js';
 import { findAvailablePort } from '../utils/port.js';
 
 // clasp-cli.js is bundled alongside index.js in dist/.
-// We run it with process.execPath (the Node.js binary running this server)
-// so no system PATH or npx is required.
 const CLASP_CLI_PATH = join(dirname(fileURLToPath(import.meta.url)), 'clasp-cli.js');
 
 const DBG_LOG = '/tmp/automategs-debug.log';
 function dbg(msg: string): void {
   try { fs.appendFileSync(DBG_LOG, `${new Date().toISOString()} [clasp] ${msg}\n`); } catch {}
+}
+
+// ---------------------------------------------------------------------------
+// resolveNode — find a real Node.js binary (not Electron's Claude Helper)
+// ---------------------------------------------------------------------------
+let _resolvedNode: string | null = null;
+
+async function resolveNode(): Promise<string> {
+  if (_resolvedNode) return _resolvedNode;
+
+  // If process.execPath looks like a real node binary, use it directly.
+  const execName = basename(process.execPath).toLowerCase();
+  if (execName === 'node' || execName.startsWith('node.exe')) {
+    dbg(`resolveNode: process.execPath looks like node → ${process.execPath}`);
+    _resolvedNode = process.execPath;
+    return _resolvedNode;
+  }
+
+  dbg(`resolveNode: process.execPath is NOT node (${process.execPath}), searching…`);
+
+  // Common fixed locations (macOS + Linux)
+  const homeDir = process.env.HOME ?? '';
+  const candidates: string[] = [
+    '/opt/homebrew/bin/node',
+    '/usr/local/bin/node',
+    '/usr/bin/node',
+    // nvm default active version symlink
+    `${homeDir}/.nvm/alias/default`,
+  ];
+
+  // Also probe nvm-style versioned paths
+  const nvmDir = process.env.NVM_DIR ?? `${homeDir}/.nvm`;
+  const nvmVersionsDir = `${nvmDir}/versions/node`;
+  if (fs.existsSync(nvmVersionsDir)) {
+    try {
+      const versions = fs.readdirSync(nvmVersionsDir).sort().reverse(); // newest first
+      for (const v of versions.slice(0, 5)) {
+        candidates.push(`${nvmVersionsDir}/${v}/bin/node`);
+      }
+    } catch { /* ignore */ }
+  }
+
+  for (const c of candidates) {
+    if (fs.existsSync(c)) {
+      dbg(`resolveNode: found candidate ${c}`);
+      _resolvedNode = c;
+      return c;
+    }
+  }
+
+  // Login shell fallback — macOS PATH is not inherited in DXT processes.
+  // A login shell sources ~/.zprofile and ~/.bash_profile, which typically
+  // add Homebrew and nvm to PATH.
+  const shell = process.env.SHELL ?? '/bin/sh';
+  try {
+    const nodePath = await new Promise<string>((resolve, reject) => {
+      execFile(shell, ['-l', '-c', 'which node 2>/dev/null || command -v node 2>/dev/null'], {
+        timeout: 5000,
+        env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+      }, (err, stdout) => {
+        if (err || !stdout.trim()) reject(new Error('which node failed'));
+        else resolve(stdout.trim().split('\n')[0]);
+      });
+    });
+    if (nodePath && fs.existsSync(nodePath)) {
+      dbg(`resolveNode: login shell found node at ${nodePath}`);
+      _resolvedNode = nodePath;
+      return nodePath;
+    }
+  } catch (e) {
+    dbg(`resolveNode: login shell lookup failed: ${e}`);
+  }
+
+  // Last resort: use process.execPath even if it's Electron — better than nothing.
+  dbg(`resolveNode: no node found, falling back to process.execPath = ${process.execPath}`);
+  _resolvedNode = process.execPath;
+  return _resolvedNode;
 }
 
 interface ClaspToken {
@@ -238,6 +313,8 @@ export async function testClaspConnection(): Promise<
 }
 
 export async function runClasp(args: string[], cwd: string): Promise<string> {
+  const nodeExec = await resolveNode();
+
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     const errChunks: Buffer[] = [];
@@ -249,11 +326,11 @@ export async function runClasp(args: string[], cwd: string): Promise<string> {
       GIT_EXEC_PATH: '/nonexistent',
     };
 
-    dbg(`runClasp START: node=${process.execPath} clasp=${CLASP_CLI_PATH}`);
+    dbg(`runClasp START: node=${nodeExec} clasp=${CLASP_CLI_PATH}`);
     dbg(`runClasp CMD: ${args.join(' ')} cwd=${cwd}`);
     dbg(`runClasp ENV.PATH="${env.PATH}" HOME="${env.HOME}"`);
 
-    const proc = spawn(process.execPath, [CLASP_CLI_PATH, ...args], {
+    const proc = spawn(nodeExec, [CLASP_CLI_PATH, ...args], {
       cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
       env,
