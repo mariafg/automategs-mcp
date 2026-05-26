@@ -324,6 +324,10 @@ export async function runClasp(args: string[], cwd: string): Promise<string> {
       PATH: '',
       GIT_TERMINAL_PROMPT: '0',
       GIT_EXEC_PATH: '/nonexistent',
+      // When process.execPath is Electron (Claude Desktop DXT), this flag
+      // makes it behave as plain Node.js — skipping GPU/network init that
+      // otherwise causes ~77s startup delay.
+      ELECTRON_RUN_AS_NODE: '1',
     };
 
     dbg(`runClasp START: node=${nodeExec} clasp=${CLASP_CLI_PATH}`);
