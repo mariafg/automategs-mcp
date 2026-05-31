@@ -56,7 +56,7 @@ async function resolveNode(): Promise<string> {
   }
 
   for (const c of candidates) {
-    if (fs.existsSync(c)) {
+    if (fs.existsSync(c) && nodeMinVersion(c, 14)) {
       dbg(`resolveNode: found candidate ${c}`);
       _resolvedNode = c;
       return c;
@@ -77,7 +77,7 @@ async function resolveNode(): Promise<string> {
         else resolve(stdout.trim().split('\n')[0]);
       });
     });
-    if (nodePath && fs.existsSync(nodePath)) {
+    if (nodePath && fs.existsSync(nodePath) && nodeMinVersion(nodePath, 14)) {
       dbg(`resolveNode: login shell found node at ${nodePath}`);
       _resolvedNode = nodePath;
       return nodePath;
@@ -90,6 +90,21 @@ async function resolveNode(): Promise<string> {
   dbg(`resolveNode: no node found, falling back to process.execPath = ${process.execPath}`);
   _resolvedNode = process.execPath;
   return _resolvedNode;
+}
+
+function nodeMinVersion(nodePath: string, minMajor: number): boolean {
+  try {
+    const { execFileSync } = require('child_process') as typeof import('child_process');
+    const out = (execFileSync(nodePath, ['--version'], {
+      timeout: 3000,
+      env: { ELECTRON_RUN_AS_NODE: '1' },
+    }) as Buffer).toString().trim();
+    const major = parseInt(out.replace(/^v/, '').split('.')[0], 10);
+    dbg(`resolveNode: ${nodePath} is ${out} (major=${major})`);
+    return major >= minMajor;
+  } catch {
+    return false;
+  }
 }
 
 interface ClaspToken {
