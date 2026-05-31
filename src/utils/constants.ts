@@ -12,9 +12,8 @@ export const VALIDATION_URL =
   'https://script.google.com/macros/s/AKfycbxbkigI3_I3OWbqP9MyunTKGaF-cJtNirjm1F5xwlPjzC3lGzrzv9Ece731ajR7LLqPSg/exec';
 
 export const PLAN_TIER_MAP: Record<string, Tier> = {
-  'automategs-free-USD-Monthly': 'free',
-  'automategs-pro-USD-Monthly': 'pro',
-  'automategs-agency-USD-Monthly': 'agency',
+  'AutomateGS-Pro-USD-Monthly': 'pro',
+  'AutomateGS-Agency-USD-Monthly': 'agency',
 };
 
 export const FREE_TIER_PROJECT_LIMIT = 1;

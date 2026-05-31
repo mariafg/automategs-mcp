@@ -16,7 +16,7 @@ export async function validateLicense(licenseKey: string): Promise<Tier> {
   }
 
   try {
-    const url = `${VALIDATION_URL}?licenseKey=${encodeURIComponent(licenseKey)}`;
+    const url = `${VALIDATION_URL}?subscription_id=${encodeURIComponent(licenseKey)}`;
     const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
 
     if (!res.ok) {
@@ -36,9 +36,8 @@ export async function validateLicense(licenseKey: string): Promise<Tier> {
       return 'free';
     }
 
-    const planId =
-      data.planId ?? data.subscriptionInfo?.subscription?.plan_id ?? '';
-    const tier: Tier = PLAN_TIER_MAP[planId] ?? 'free';
+    const planId = data.subscriptionInfo?.subscription?.plan_id ?? '';
+    const tier: Tier = PLAN_TIER_MAP[planId] ?? 'pro';
 
     cache.set(licenseKey, { tier, expiresAt: Date.now() + CACHE_TTL_MS });
     return tier;
