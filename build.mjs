@@ -37,16 +37,21 @@ console.log('esbuild bundle complete');
 
 // 2b. Bundle clasp CLI as a sibling script — used at runtime via
 //     spawn(nodeExec, [claspCliPath, ...args]) so npx is not required.
-//     CJS format (not ESM) so it works with any Node.js version ≥ 12,
-//     including old system installs that resolveNode() might discover.
+//     ESM format is required because @google/clasp uses top-level await.
+//     resolveNode() ensures only Node.js ≥ v16 (stable ESM) is used;
+//     on machines without a suitable node it falls back to Electron with
+//     ELECTRON_RUN_AS_NODE=1, which also supports ESM.
 await esbuild.build({
   entryPoints: ['node_modules/@google/clasp/build/src/index.js'],
   bundle: true,
   platform: 'node',
-  target: 'node14',
+  target: 'node20',
   outfile: 'dist/clasp-cli.js',
-  format: 'cjs',
+  format: 'esm',
   external: [],
+  banner: {
+    js: "import { createRequire } from 'module'; const require = createRequire(import.meta.url);",
+  },
 });
 
 console.log('clasp-cli bundle complete');

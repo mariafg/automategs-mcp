@@ -56,7 +56,7 @@ async function resolveNode(): Promise<string> {
   }
 
   for (const c of candidates) {
-    if (fs.existsSync(c) && nodeMinVersion(c, 14)) {
+    if (fs.existsSync(c) && nodeMinVersion(c, 16)) {
       dbg(`resolveNode: found candidate ${c}`);
       _resolvedNode = c;
       return c;
