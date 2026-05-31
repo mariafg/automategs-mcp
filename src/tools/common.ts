@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { McpError, ErrorCode } from '@modelcontextprotocol/sdk/types.js';
 import open from 'open';
-import { runClasp } from '../auth/clasp.js';
+import { runClasp, getAccessToken } from '../auth/clasp.js';
 import { SCRIPTS_DIR, EXECUTION_TIMEOUT_MS } from '../utils/constants.js';
 import { buildScriptCode, buildAppsScriptManifest, DEFAULT_SCOPES } from '../gas/template.js';
 import type { Registry, Tier } from '../registry/types.js';

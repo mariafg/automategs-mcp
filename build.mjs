@@ -49,8 +49,19 @@ await esbuild.build({
   outfile: 'dist/clasp-cli.js',
   format: 'esm',
   external: [],
+  // clasp bundles CJS dependencies that reference Node globals (require,
+  // __dirname, __filename) which don't exist in ESM scope. Shim them all.
+  // Aliased imports (__cr/__fu/__pd) avoid colliding with esbuild's own
+  // auto-injected `createRequire` when it wraps CJS modules.
   banner: {
-    js: "import { createRequire } from 'module'; const require = createRequire(import.meta.url);",
+    js: [
+      "import { createRequire as __cr } from 'module';",
+      "import { fileURLToPath as __fu } from 'url';",
+      "import { dirname as __pd } from 'path';",
+      'const require = __cr(import.meta.url);',
+      'const __filename = __fu(import.meta.url);',
+      'const __dirname = __pd(__filename);',
+    ].join('\n'),
   },
 });
 
