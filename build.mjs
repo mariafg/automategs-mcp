@@ -16,12 +16,21 @@ console.log(`Building automategs-mcp v${pkg.version} at ${buildTime}`);
 await rimraf(join(__dirname, 'dist'));
 
 // 2. esbuild bundle — inject version + build timestamp as compile-time constants
+//    Output as .mjs (not .js): the .mcpb ships no package.json, so a plain
+//    .js file's module type depends on Node auto-detecting ESM syntax from
+//    the bare file — a feature only on by default since Node 22.7. When
+//    Claude Desktop falls back to its own (older) bundled Electron Node
+//    because no system Node was found, that auto-detection isn't there,
+//    so the bundle gets parsed as CommonJS and crashes immediately on the
+//    top-level `import` statement, before any of our own logging runs.
+//    .mjs always parses as ESM regardless of Node version or nearby
+//    package.json — same fix already applied to clasp-cli below.
 await esbuild.build({
   entryPoints: ['src/index.ts'],
   bundle: true,
   platform: 'node',
   target: 'node20',
-  outfile: 'dist/index.js',
+  outfile: 'dist/index.mjs',
   format: 'esm',
   external: [],
   define: {
@@ -74,7 +83,7 @@ console.log('clasp-cli bundle complete');
 //    rc4 encoding removed: RC4 key-scheduling runs a 256-step init loop per encoded
 //    string, which is too slow in Electron's V8 context — Claude Desktop kills the
 //    process before initialize can respond. base64 decodes in O(n), startup is instant.
-const code = readFileSync(join(__dirname, 'dist/index.js'), 'utf8');
+const code = readFileSync(join(__dirname, 'dist/index.mjs'), 'utf8');
 const obfuscated = JavaScriptObfuscator.obfuscate(code, {
   compact: true,
   stringArray: true,
@@ -85,7 +94,7 @@ const obfuscated = JavaScriptObfuscator.obfuscate(code, {
   identifierNamesGenerator: 'hexadecimal',
   selfDefending: false,
 });
-writeFileSync(join(__dirname, 'dist/index.js'), obfuscated.getObfuscatedCode());
+writeFileSync(join(__dirname, 'dist/index.mjs'), obfuscated.getObfuscatedCode());
 
 console.log('Obfuscation complete');
 
