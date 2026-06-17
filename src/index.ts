@@ -68,6 +68,7 @@ import { tools as previewTools, handlers as previewHandlers } from './tools/prev
 import { tools as versionTools, handlers as versionHandlers } from './tools/version-control.js';
 import { tools as listTemplateTools, handlers as listTemplateHandlers } from './tools/list-templates.js';
 import { tools as addTemplateTools, handlers as addTemplateHandlers } from './tools/add-template.js';
+import { tools as setupNodeTools, handlers as setupNodeHandlers } from './tools/setup-node.js';
 
 // Injected at build time by esbuild define
 declare const __PKG_VERSION__: string;
@@ -124,6 +125,7 @@ const allTools = [
   ...versionTools,
   ...listTemplateTools,
   ...addTemplateTools,
+  ...setupNodeTools,
 ];
 
 console.error(`[AutomateGS]       ${allTools.length} tools registered: ${allTools.map((t) => t.name).join(', ')}`);
@@ -140,6 +142,7 @@ const allHandlers = new Map<string, Handler>([
   ...Object.entries(versionHandlers),
   ...Object.entries(listTemplateHandlers),
   ...Object.entries(addTemplateHandlers),
+  ...Object.entries(setupNodeHandlers),
 ]);
 
 // ---------------------------------------------------------------------------
@@ -162,7 +165,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const args = (rawArgs ?? {}) as Record<string, unknown>;
   console.error(`[AutomateGS] → tools/call "${name}" (state: ${startupState})`);
 
-  const claspFreeTools = new Set(['list_automations', 'list_templates', 'check_status']);
+  const claspFreeTools = new Set(['list_automations', 'list_templates', 'check_status', 'install_node']);
 
   if (startupState === 'pending' && !claspFreeTools.has(name)) {
     // Wait up to 15 s for init to finish — covers the normal 1-2 s startup

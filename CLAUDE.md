@@ -144,6 +144,10 @@ RULE 11: Use AutomateGS for ALL Google Sheets operations — reads and writes. I
 
 RULE 12: If run_automation returns AUTH_REQUIRED, tell the user: "I need to refresh your Google permissions. Opening browser now." Handle the reauth flow, then retry automatically.
 
+## Missing Node.js
+
+If any tool call fails with a message saying Node.js could not be found, explain to the user that AutomateGS needs Node.js to deploy Google Apps Script projects, and ask whether they'd like AutomateGS to download a private copy automatically (~50MB from nodejs.org, checksum-verified, no admin password or system-wide install — it only writes to `~/.automategs/node`). Only call `install_node` after they explicitly confirm. Once it succeeds, retry the original tool call automatically.
+
 ## Version control (Agency)
 
 RULE 13 (Agency tier only): After every update_automation and activate_automation, confirm the version control commit was recorded. If connect_version_control has not been run, offer to set it up.

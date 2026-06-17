@@ -1,5 +1,7 @@
 import fs from 'fs';
 import http from 'http';
+import os from 'os';
+import crypto from 'crypto';
 import { spawn, execFile } from 'child_process';
 import { dirname, join, basename } from 'path';
 import { fileURLToPath } from 'url';
@@ -13,6 +15,83 @@ const CLASP_CLI_PATH = join(dirname(fileURLToPath(import.meta.url)), 'clasp-cli.
 const DBG_LOG = '/tmp/automategs-debug.log';
 function dbg(msg: string): void {
   try { fs.appendFileSync(DBG_LOG, `${new Date().toISOString()} [clasp] ${msg}\n`); } catch {}
+}
+
+// ---------------------------------------------------------------------------
+// Portable Node — a private, sandboxed Node.js AutomateGS can download for
+// itself when no system Node.js is found. No admin password, no Homebrew,
+// no Xcode CLT required: just an HTTPS download + tar extraction into our
+// own app-support directory. Installed once, reused on every future run.
+// ---------------------------------------------------------------------------
+const PORTABLE_NODE_VERSION = 'v20.18.1';
+const PORTABLE_NODE_DIR = join(os.homedir(), '.automategs', 'node');
+export const PORTABLE_NODE_BIN = join(PORTABLE_NODE_DIR, 'bin', 'node');
+
+function portableNodePlatformArch(): { platform: string; arch: string } {
+  const platform = process.platform === 'darwin' ? 'darwin' : process.platform === 'linux' ? 'linux' : null;
+  const arch = process.arch === 'arm64' ? 'arm64' : process.arch === 'x64' ? 'x64' : null;
+  if (!platform || !arch) {
+    throw new Error(
+      `AutomateGS cannot auto-install Node.js on ${process.platform}/${process.arch}. ` +
+      'Please install Node.js manually from https://nodejs.org.'
+    );
+  }
+  return { platform, arch };
+}
+
+/**
+ * Downloads the official Node.js release tarball for this machine, verifies
+ * it against nodejs.org's published SHA256 checksum, and extracts it into
+ * PORTABLE_NODE_DIR. Returns the path to the resulting `node` binary.
+ */
+export async function installPortableNode(): Promise<string> {
+  if (fs.existsSync(PORTABLE_NODE_BIN) && nodeMinVersion(PORTABLE_NODE_BIN, 16)) {
+    dbg(`installPortableNode: already installed at ${PORTABLE_NODE_BIN}`);
+    return PORTABLE_NODE_BIN;
+  }
+
+  const { platform, arch } = portableNodePlatformArch();
+  const fileName = `node-${PORTABLE_NODE_VERSION}-${platform}-${arch}.tar.gz`;
+  const baseUrl = `https://nodejs.org/dist/${PORTABLE_NODE_VERSION}`;
+
+  dbg(`installPortableNode: downloading ${baseUrl}/${fileName}`);
+  const [tarballRes, shasumsRes] = await Promise.all([
+    fetch(`${baseUrl}/${fileName}`),
+    fetch(`${baseUrl}/SHASUMS256.txt`),
+  ]);
+  if (!tarballRes.ok) throw new Error(`Failed to download Node.js: ${tarballRes.status}`);
+  if (!shasumsRes.ok) throw new Error(`Failed to download Node.js checksums: ${shasumsRes.status}`);
+
+  const tarballBuf = Buffer.from(await tarballRes.arrayBuffer());
+  const shasumsText = await shasumsRes.text();
+  const expectedLine = shasumsText.split('\n').find((l) => l.trim().endsWith(fileName));
+  const expectedHash = expectedLine?.split(/\s+/)[0];
+  if (!expectedHash) throw new Error(`Could not find checksum for ${fileName} in SHASUMS256.txt`);
+
+  const actualHash = crypto.createHash('sha256').update(tarballBuf).digest('hex');
+  if (actualHash !== expectedHash) {
+    throw new Error(`Node.js download checksum mismatch (expected ${expectedHash}, got ${actualHash})`);
+  }
+  dbg('installPortableNode: checksum verified');
+
+  fs.rmSync(PORTABLE_NODE_DIR, { recursive: true, force: true });
+  fs.mkdirSync(PORTABLE_NODE_DIR, { recursive: true });
+
+  const tmpTarball = join(os.tmpdir(), fileName);
+  fs.writeFileSync(tmpTarball, tarballBuf);
+
+  await new Promise<void>((resolve, reject) => {
+    const tar = spawn('/usr/bin/tar', ['-xzf', tmpTarball, '-C', PORTABLE_NODE_DIR, '--strip-components=1']);
+    tar.on('error', reject);
+    tar.on('close', (code) => (code === 0 ? resolve() : reject(new Error(`tar exited with code ${code}`))));
+  });
+  fs.rmSync(tmpTarball, { force: true });
+
+  if (!fs.existsSync(PORTABLE_NODE_BIN) || !nodeMinVersion(PORTABLE_NODE_BIN, 16)) {
+    throw new Error('Node.js extraction did not produce a working binary.');
+  }
+  dbg(`installPortableNode: installed at ${PORTABLE_NODE_BIN}`);
+  return PORTABLE_NODE_BIN;
 }
 
 // ---------------------------------------------------------------------------
@@ -47,6 +126,9 @@ async function resolveNode(): Promise<string> {
   // Common fixed locations (macOS + Linux)
   const homeDir = process.env.HOME ?? '';
   const candidates: string[] = [
+    // Our own private install — see installPortableNode(). Checked first
+    // since we know it's a real, version-checked Node we put there ourselves.
+    PORTABLE_NODE_BIN,
     '/opt/homebrew/bin/node',
     '/usr/local/bin/node',
     '/usr/bin/node',
@@ -115,8 +197,9 @@ async function resolveNode(): Promise<string> {
   // error instead of silently handing back a binary known to crash.
   dbg(`resolveNode: no real Node.js binary found (process.execPath = ${process.execPath})`);
   throw new Error(
-    'AutomateGS could not find a Node.js installation on this machine. ' +
-    'Please install Node.js (e.g. via https://nodejs.org or Homebrew) and try again.'
+    'AutomateGS needs Node.js to run, but none was found on this machine. ' +
+    'Ask AutomateGS to call the install_node tool to download a private copy automatically ' +
+    '(no admin password or system install required), then try again.'
   );
 }
 
