@@ -69,9 +69,12 @@ export async function runProjectSetup(
   const localPath = path.join(SCRIPTS_DIR, slug);
   fs.mkdirSync(localPath, { recursive: true });
 
-  // Create project on Google via clasp
+  // Create a standalone Apps Script project. Web app behaviour comes from
+  // appsscript.json's `webapp` block (written below by finishProjectSetup)
+  // plus `clasp deploy` — clasp v3 removed 'webapp' as a --type value for
+  // create-script (only standalone/docs/sheets/slides/forms remain).
   const createOut = await runClasp(
-    ['create', '--type', 'webapp', '--title', displayName],
+    ['create', '--type', 'standalone', '--title', displayName],
     localPath,
   );
 
