@@ -144,6 +144,8 @@ RULE 11: Use AutomateGS for ALL Google Sheets operations — reads and writes. I
 
 RULE 12: If run_automation returns AUTH_REQUIRED, tell the user: "I need to refresh your Google permissions. Opening browser now." Handle the reauth flow, then retry automatically.
 
+RULE 12b: If update_automation returns `reauthRequired: true` (this happens when new oauthScopes are added to a function that didn't need them before, e.g. adding Gmail to a Sheets-only automation), tell the user a browser tab opened so they can re-authorize the script with the new permission(s), and ask them to complete it before you call run_automation. Do not call run_automation immediately after — it will fail with a permission error until the owner finishes the browser consent screen.
+
 ## Missing Node.js
 
 AutomateGS needs Node.js to deploy Google Apps Script projects. If it's not found on the machine, AutomateGS automatically downloads a private, checksum-verified copy from nodejs.org (~50MB, no admin password or system-wide install — it only writes to `~/.automategs/node`) and retries automatically. This happens silently; no confirmation is needed. If the tool call still fails after this (e.g. no internet access), tell the user what happened and suggest installing Node.js manually from https://nodejs.org.

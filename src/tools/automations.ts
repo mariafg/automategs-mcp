@@ -20,6 +20,7 @@ import {
   deployFunctionCode,
   callWebApp,
 } from './common.js';
+import { DEFAULT_SCOPES } from '../gas/template.js';
 
 const ASYNC_EXECUTIONS = new Map<string, { status: string; result?: unknown; error?: string }>();
 
@@ -169,6 +170,7 @@ export const handlers: Record<
       setupComplete: true,
       createdAt: now,
       lastDeployed: now,
+      authorizedScopes: [...DEFAULT_SCOPES],
     };
 
     registry.projects[id] = project;
@@ -227,6 +229,25 @@ export const handlers: Record<
       project.webAppUrl = `https://script.google.com/macros/s/${newDeploymentId}/exec`;
     }
     project.lastDeployed = now;
+
+    // Google requires the script owner to re-consent in the browser whenever
+    // a deployment starts using a scope it didn't already have authorization
+    // for (e.g. adding Gmail send permission to a script that previously
+    // only touched Sheets). Without this, run_automation fails with
+    // "The script does not have permission to perform that action" even
+    // though the manifest and deployment both look correct.
+    const requiredScopes = [...DEFAULT_SCOPES, ...oauthScopes];
+    const authorizedScopes = project.authorizedScopes ?? [...DEFAULT_SCOPES];
+    const newScopes = requiredScopes.filter((s) => !authorizedScopes.includes(s));
+    const reauthRequired = newScopes.length > 0 && !!project.webAppUrl;
+
+    if (reauthRequired && project.webAppUrl) {
+      open(project.webAppUrl).catch(() => {
+        console.error(`[AutomateGS] Could not auto-open browser. Please visit: ${project.webAppUrl}`);
+      });
+      project.authorizedScopes = [...new Set([...authorizedScopes, ...requiredScopes])];
+    }
+
     saveRegistry(registry);
 
     return text({
@@ -235,7 +256,15 @@ export const handlers: Record<
       functionName,
       status: 'draft',
       webAppUrl: project.webAppUrl,
-      message: `Function "${functionName}" updated and pushed. Status: draft. Use preview_automation (Pro/Agency) or run_automation to test it.`,
+      reauthRequired,
+      ...(reauthRequired
+        ? {
+            newScopes,
+            message: `Function "${functionName}" updated and pushed. This added new permissions (${newScopes.join(', ')}), so a browser tab opened for the account owner to re-authorize the script. Complete that authorization, then retry run_automation.`,
+          }
+        : {
+            message: `Function "${functionName}" updated and pushed. Status: draft. Use preview_automation (Pro/Agency) or run_automation to test it.`,
+          }),
     });
   },
 

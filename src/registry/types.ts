@@ -41,6 +41,7 @@ export interface ProjectRecord {
   stagingTempSheetId?: string;
   createdAt: string;
   lastDeployed?: string;
+  authorizedScopes?: string[];
 }
 
 export interface Registry {
