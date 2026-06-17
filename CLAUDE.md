@@ -144,7 +144,7 @@ RULE 11: Use AutomateGS for ALL Google Sheets operations — reads and writes. I
 
 RULE 12: If run_automation returns AUTH_REQUIRED, tell the user: "I need to refresh your Google permissions. Opening browser now." Handle the reauth flow, then retry automatically.
 
-RULE 12b: If update_automation returns `reauthRequired: true` (this happens when new oauthScopes are added to a function that didn't need them before, e.g. adding Gmail to a Sheets-only automation), tell the user a browser tab opened so they can re-authorize the script with the new permission(s), and ask them to complete it before you call run_automation. Do not call run_automation immediately after — it will fail with a permission error until the owner finishes the browser consent screen.
+RULE 12b: If update_automation returns `reauthRequired: true` (this happens when new oauthScopes are added to a function that didn't need them before, e.g. adding Gmail to a Sheets-only automation), or if run_automation returns `status: 'authorization_required'`, a browser tab opens to the Apps Script editor (`editorUrl`). Tell the user to select the function from the dropdown at the top of the editor and click Run once, then complete Google's permissions dialog (Advanced > Go to ... > Allow). This manual run-once-in-the-editor step is what actually grants the new scope — opening the deployed web app URL does NOT trigger Google's consent screen, since the script just runs and the unauthorized call fails silently into a normal error response instead. Do not call run_automation again until the user confirms they completed this in the editor.
 
 ## Missing Node.js
 
