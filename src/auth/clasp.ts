@@ -20,6 +20,17 @@ function dbg(msg: string): void {
 // ---------------------------------------------------------------------------
 let _resolvedNode: string | null = null;
 
+// Cheap, process-spawn-free check for whether Xcode Command Line Tools are
+// installed. Used to skip the login-shell fallback below, which can touch
+// the user's shell rc files and trigger macOS's CLT-install dialog if git
+// gets invoked there without CLT present.
+function hasXcodeCLT(): boolean {
+  return (
+    fs.existsSync('/Library/Developer/CommandLineTools/usr/bin/git') ||
+    fs.existsSync('/Applications/Xcode.app/Contents/Developer/usr/bin/git')
+  );
+}
+
 async function resolveNode(): Promise<string> {
   if (_resolvedNode) return _resolvedNode;
 
@@ -65,25 +76,32 @@ async function resolveNode(): Promise<string> {
 
   // Login shell fallback — macOS PATH is not inherited in DXT processes.
   // A login shell sources ~/.zprofile and ~/.bash_profile, which typically
-  // add Homebrew and nvm to PATH.
-  const shell = process.env.SHELL ?? '/bin/sh';
-  try {
-    const nodePath = await new Promise<string>((resolve, reject) => {
-      execFile(shell, ['-l', '-c', 'which node 2>/dev/null || command -v node 2>/dev/null'], {
-        timeout: 5000,
-        env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
-      }, (err, stdout) => {
-        if (err || !stdout.trim()) reject(new Error('which node failed'));
-        else resolve(stdout.trim().split('\n')[0]);
+  // add Homebrew and nvm to PATH. Skip this if Xcode CLT isn't installed:
+  // those rc files commonly shell out to git (prompt themes, version
+  // managers), and without CLT present that would trigger macOS's
+  // "Install Command Line Developer Tools" dialog.
+  if (!hasXcodeCLT()) {
+    dbg('resolveNode: skipping login shell fallback (Xcode CLT not installed)');
+  } else {
+    const shell = process.env.SHELL ?? '/bin/sh';
+    try {
+      const nodePath = await new Promise<string>((resolve, reject) => {
+        execFile(shell, ['-l', '-c', 'which node 2>/dev/null || command -v node 2>/dev/null'], {
+          timeout: 5000,
+          env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+        }, (err, stdout) => {
+          if (err || !stdout.trim()) reject(new Error('which node failed'));
+          else resolve(stdout.trim().split('\n')[0]);
+        });
       });
-    });
-    if (nodePath && fs.existsSync(nodePath) && nodeMinVersion(nodePath, 14)) {
-      dbg(`resolveNode: login shell found node at ${nodePath}`);
-      _resolvedNode = nodePath;
-      return nodePath;
+      if (nodePath && fs.existsSync(nodePath) && nodeMinVersion(nodePath, 16)) {
+        dbg(`resolveNode: login shell found node at ${nodePath}`);
+        _resolvedNode = nodePath;
+        return nodePath;
+      }
+    } catch (e) {
+      dbg(`resolveNode: login shell lookup failed: ${e}`);
     }
-  } catch (e) {
-    dbg(`resolveNode: login shell lookup failed: ${e}`);
   }
 
   // Last resort: use process.execPath even if it's Electron — better than nothing.
