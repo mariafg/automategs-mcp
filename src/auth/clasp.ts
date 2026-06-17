@@ -9,8 +9,10 @@ import open from 'open';
 import { CLASPRC_PATH, CLASP_CLIENT_ID, CLASP_CLIENT_SECRET } from '../utils/constants.js';
 import { findAvailablePort } from '../utils/port.js';
 
-// clasp-cli.js is bundled alongside index.js in dist/.
-const CLASP_CLI_PATH = join(dirname(fileURLToPath(import.meta.url)), 'clasp-cli.js');
+// clasp-cli.mjs is bundled alongside index.js in dist/. The .mjs extension
+// forces ESM parsing even when spawned with a real system Node that has no
+// package.json nearby to declare "type": "module".
+const CLASP_CLI_PATH = join(dirname(fileURLToPath(import.meta.url)), 'clasp-cli.mjs');
 
 const DBG_LOG = '/tmp/automategs-debug.log';
 function dbg(msg: string): void {

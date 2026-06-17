@@ -37,16 +37,18 @@ console.log('esbuild bundle complete');
 
 // 2b. Bundle clasp CLI as a sibling script — used at runtime via
 //     spawn(nodeExec, [claspCliPath, ...args]) so npx is not required.
-//     ESM format is required because @google/clasp uses top-level await.
-//     resolveNode() ensures only Node.js ≥ v16 (stable ESM) is used;
-//     on machines without a suitable node it falls back to Electron with
-//     ELECTRON_RUN_AS_NODE=1, which also supports ESM.
+//     Output as .mjs (not .js): when nodeExec is a real system Node found
+//     on the user's machine (not the Electron host's own launcher), Node
+//     determines module type purely from file extension / nearest
+//     package.json. We ship no package.json next to dist/, so a plain .js
+//     file would default to CommonJS and fail on the bundle's top-level
+//     `import` statements. .mjs always parses as ESM regardless of that.
 await esbuild.build({
   entryPoints: ['node_modules/@google/clasp/build/src/index.js'],
   bundle: true,
   platform: 'node',
   target: 'node20',
-  outfile: 'dist/clasp-cli.js',
+  outfile: 'dist/clasp-cli.mjs',
   format: 'esm',
   external: [],
   // esbuild sometimes auto-injects var __dirname / var __filename.
