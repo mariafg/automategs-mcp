@@ -238,19 +238,18 @@ export const handlers: Record<
     // hitting /exec just runs the script immediately, and the unauthorized
     // API call throws *inside* doPost's try/catch (see system-functions.ts),
     // which gets serialized as a normal `{success:false, error:...}` JSON
-    // response rather than surfacing an HTML auth page. The only reliable
-    // way to make Google show the owner the OAuth consent dialog for the
-    // new scopes is to open the Apps Script *editor* and have them run the
-    // function once from there.
+    // response rather than surfacing an HTML auth page. Google's dedicated
+    // script-authorization endpoint shows just the OAuth consent screen for
+    // the script's declared scopes (no code editor UI involved).
     const requiredScopes = [...DEFAULT_SCOPES, ...oauthScopes];
     const authorizedScopes = project.authorizedScopes ?? [...DEFAULT_SCOPES];
     const newScopes = requiredScopes.filter((s) => !authorizedScopes.includes(s));
     const reauthRequired = newScopes.length > 0;
-    const editorUrl = `https://script.google.com/d/${project.scriptId}/edit`;
+    const authorizeUrl = `https://script.google.com/macros/d/${project.scriptId}/authorize`;
 
     if (reauthRequired) {
-      open(editorUrl).catch(() => {
-        console.error(`[AutomateGS] Could not auto-open browser. Please visit: ${editorUrl}`);
+      open(authorizeUrl).catch(() => {
+        console.error(`[AutomateGS] Could not auto-open browser. Please visit: ${authorizeUrl}`);
       });
       project.authorizedScopes = [...new Set([...authorizedScopes, ...requiredScopes])];
     }
@@ -267,8 +266,8 @@ export const handlers: Record<
       ...(reauthRequired
         ? {
             newScopes,
-            editorUrl,
-            message: `Function "${functionName}" updated and pushed. This added new permissions (${newScopes.join(', ')}). A browser tab opened to the Apps Script editor — in it, select "${functionName}" from the function dropdown at the top and click Run, then complete the Google permissions dialog (Advanced > Go to ... > Allow). This one-time manual run is what actually grants the new scope; just opening the web app URL does not. Once you've done that, retry run_automation.`,
+            authorizeUrl,
+            message: `Function "${functionName}" updated and pushed. This added new permissions (${newScopes.join(', ')}). A browser tab opened to Google's authorization screen for this script — review the permissions and click Allow. Once you've done that, retry run_automation.`,
           }
         : {
             message: `Function "${functionName}" updated and pushed. Status: draft. Use preview_automation (Pro/Agency) or run_automation to test it.`,
@@ -326,23 +325,22 @@ export const handlers: Record<
       // runs, the privileged API call throws, and doPost serializes that as
       // a normal {success:false, error:...} response. Detect Google's
       // characteristic permission-error text here and point the owner at
-      // the Apps Script editor, which is the only place that one-time
-      // consent dialog actually appears.
+      // Google's dedicated script-authorization screen.
       if (
         !result.success &&
         result.error &&
         /you do not have permission/i.test(result.error) &&
         /required permission/i.test(result.error)
       ) {
-        const editorUrl = `https://script.google.com/d/${project.scriptId}/edit`;
-        open(editorUrl).catch(() => {
-          console.error(`[AutomateGS] Could not auto-open browser. Please visit: ${editorUrl}`);
+        const authorizeUrl = `https://script.google.com/macros/d/${project.scriptId}/authorize`;
+        open(authorizeUrl).catch(() => {
+          console.error(`[AutomateGS] Could not auto-open browser. Please visit: ${authorizeUrl}`);
         });
         return text({
           status: 'authorization_required',
           error: result.error,
-          editorUrl,
-          message: `Google blocked this call because the script owner hasn't granted one of its permissions yet: ${result.error} A browser tab opened to the Apps Script editor — select "${functionName}" from the function dropdown and click Run once, then complete the Google permissions dialog. Opening the deployed web app URL does not trigger this dialog; running the function from the editor does. Retry run_automation after that.`,
+          authorizeUrl,
+          message: `Google blocked this call because the script owner hasn't granted one of its permissions yet: ${result.error} A browser tab opened to Google's authorization screen for this script — review the permissions and click Allow, then retry run_automation.`,
         });
       }
 
