@@ -50,8 +50,12 @@ async function resolveNode(): Promise<string> {
     '/opt/homebrew/bin/node',
     '/usr/local/bin/node',
     '/usr/bin/node',
+    '/opt/local/bin/node', // MacPorts
     // nvm default active version symlink
     `${homeDir}/.nvm/alias/default`,
+    `${homeDir}/.volta/bin/node`,
+    `${homeDir}/.asdf/shims/node`,
+    `${homeDir}/.local/share/fnm/aliases/default/bin/node`,
   ];
 
   // Also probe nvm-style versioned paths
@@ -104,10 +108,16 @@ async function resolveNode(): Promise<string> {
     }
   }
 
-  // Last resort: use process.execPath even if it's Electron — better than nothing.
-  dbg(`resolveNode: no node found, falling back to process.execPath = ${process.execPath}`);
-  _resolvedNode = process.execPath;
-  return _resolvedNode;
+  // Spawning Electron's own executable as a stand-in Node binary is not a
+  // safe last resort: even with ELECTRON_RUN_AS_NODE=1, launching it outside
+  // its app bundle can still try to start its GPU/helper process and crash
+  // fatally ("Unable to find helper app"). Fail with a clear, actionable
+  // error instead of silently handing back a binary known to crash.
+  dbg(`resolveNode: no real Node.js binary found (process.execPath = ${process.execPath})`);
+  throw new Error(
+    'AutomateGS could not find a Node.js installation on this machine. ' +
+    'Please install Node.js (e.g. via https://nodejs.org or Homebrew) and try again.'
+  );
 }
 
 function nodeMinVersion(nodePath: string, minMajor: number): boolean {
