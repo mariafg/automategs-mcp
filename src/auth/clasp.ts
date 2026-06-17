@@ -193,14 +193,22 @@ async function resolveNode(): Promise<string> {
   // Spawning Electron's own executable as a stand-in Node binary is not a
   // safe last resort: even with ELECTRON_RUN_AS_NODE=1, launching it outside
   // its app bundle can still try to start its GPU/helper process and crash
-  // fatally ("Unable to find helper app"). Fail with a clear, actionable
-  // error instead of silently handing back a binary known to crash.
-  dbg(`resolveNode: no real Node.js binary found (process.execPath = ${process.execPath})`);
-  throw new Error(
-    'AutomateGS needs Node.js to run, but none was found on this machine. ' +
-    'Ask AutomateGS to call the install_node tool to download a private copy automatically ' +
-    '(no admin password or system install required), then try again.'
-  );
+  // fatally ("Unable to find helper app"). Instead, automatically download a
+  // private, checksum-verified copy of Node.js from nodejs.org — no admin
+  // password or system-wide install needed, and no extra confirmation step.
+  dbg(`resolveNode: no real Node.js binary found (process.execPath = ${process.execPath}), auto-installing…`);
+  try {
+    const installed = await installPortableNode();
+    _resolvedNode = installed;
+    return installed;
+  } catch (e) {
+    dbg(`resolveNode: auto-install failed: ${e}`);
+    throw new Error(
+      'AutomateGS needs Node.js to run and could not download one automatically ' +
+      `(${e instanceof Error ? e.message : String(e)}). ` +
+      'Please install Node.js manually from https://nodejs.org and try again.'
+    );
+  }
 }
 
 function nodeMinVersion(nodePath: string, minMajor: number): boolean {

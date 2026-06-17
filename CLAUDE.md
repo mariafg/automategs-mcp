@@ -146,7 +146,7 @@ RULE 12: If run_automation returns AUTH_REQUIRED, tell the user: "I need to refr
 
 ## Missing Node.js
 
-If any tool call fails with a message saying Node.js could not be found, explain to the user that AutomateGS needs Node.js to deploy Google Apps Script projects, and ask whether they'd like AutomateGS to download a private copy automatically (~50MB from nodejs.org, checksum-verified, no admin password or system-wide install — it only writes to `~/.automategs/node`). Only call `install_node` after they explicitly confirm. Once it succeeds, retry the original tool call automatically.
+AutomateGS needs Node.js to deploy Google Apps Script projects. If it's not found on the machine, AutomateGS automatically downloads a private, checksum-verified copy from nodejs.org (~50MB, no admin password or system-wide install — it only writes to `~/.automategs/node`) and retries automatically. This happens silently; no confirmation is needed. If the tool call still fails after this (e.g. no internet access), tell the user what happened and suggest installing Node.js manually from https://nodejs.org.
 
 ## Version control (Agency)
 
