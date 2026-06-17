@@ -236,8 +236,18 @@ interface ClaspToken {
   scope?: string;
 }
 
-interface ClaspRc {
-  token: ClaspToken;
+// clasp v3's on-disk credential format: a map of user keys (we only ever
+// use 'default') to StoredCredential objects, read/written by clasp's own
+// FileCredentialStore. clasp v2 used a flatter { token: {...} } shape —
+// writing that here makes clasp v3 unable to find credentials at all
+// ("No credentials found"), since its legacy-format fallback requires
+// fields (oauth2ClientSettings, or top-level access_token) that the old
+// shape didn't carry either.
+interface ClaspRcV3 {
+  tokens: {
+    default?: ClaspToken & { type: 'authorized_user'; client_id: string; client_secret: string };
+    [user: string]: unknown;
+  };
 }
 
 // Scopes matching what @google/clasp requests
@@ -257,16 +267,20 @@ const CLASP_SCOPES = [
 export function isClaspAuthenticated(): boolean {
   if (!fs.existsSync(CLASPRC_PATH)) return false;
   try {
-    const rc = JSON.parse(fs.readFileSync(CLASPRC_PATH, 'utf8')) as ClaspRc;
-    return !!(rc.token?.access_token && rc.token?.refresh_token);
+    const rc = JSON.parse(fs.readFileSync(CLASPRC_PATH, 'utf8')) as ClaspRcV3;
+    const token = rc.tokens?.default;
+    return !!(token?.access_token && token?.refresh_token);
   } catch {
     return false;
   }
 }
 
 export async function getAccessToken(): Promise<string> {
-  const rc = JSON.parse(fs.readFileSync(CLASPRC_PATH, 'utf8')) as ClaspRc;
-  const token = rc.token;
+  const rc = JSON.parse(fs.readFileSync(CLASPRC_PATH, 'utf8')) as ClaspRcV3;
+  const token = rc.tokens.default;
+  if (!token) {
+    throw new Error('No credentials found.');
+  }
 
   if (token.expiry_date > Date.now() + 60_000) {
     return token.access_token;
@@ -288,13 +302,13 @@ export async function getAccessToken(): Promise<string> {
   }
 
   const refreshed = (await res.json()) as Partial<ClaspToken>;
-  const updatedToken: ClaspToken = {
+  const updatedToken = {
     ...token,
     access_token: refreshed.access_token ?? token.access_token,
     expiry_date: refreshed.expiry_date ?? Date.now() + 3600_000,
   };
 
-  rc.token = updatedToken;
+  rc.tokens.default = updatedToken;
   fs.writeFileSync(CLASPRC_PATH, JSON.stringify(rc, null, 2));
 
   return updatedToken.access_token;
@@ -415,13 +429,18 @@ export async function runClaspLoginBrowser(onUrl?: (url: string) => void): Promi
     scope: string;
   };
 
-  const claspRc: ClaspRc = {
-    token: {
-      access_token: tokens.access_token,
-      refresh_token: tokens.refresh_token,
-      expiry_date: Date.now() + tokens.expires_in * 1000,
-      token_type: tokens.token_type,
-      scope: tokens.scope,
+  const claspRc: ClaspRcV3 = {
+    tokens: {
+      default: {
+        type: 'authorized_user',
+        access_token: tokens.access_token,
+        refresh_token: tokens.refresh_token,
+        expiry_date: Date.now() + tokens.expires_in * 1000,
+        token_type: tokens.token_type,
+        scope: tokens.scope,
+        client_id: CLASP_CLIENT_ID,
+        client_secret: CLASP_CLIENT_SECRET,
+      },
     },
   };
 

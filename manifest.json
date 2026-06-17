@@ -2,7 +2,7 @@
   "dxt_version": "0.1",
   "name": "automategs-mcp",
   "display_name": "AutomateGS",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "AI automation for Google Workspace. Write, preview, and run Google Apps Script automations directly from Claude.",
   "long_description": "AutomateGS connects Claude to Google Workspace so you can create, deploy, and schedule Google Apps Script automations in plain English. Describe what you want to automate — syncing spreadsheet data, sending reports, calling external APIs — and Claude writes the code and deploys it to your own Google account in seconds.\n\nEvery automation goes through a safety review before it touches your real data. AutomateGS creates a staging copy of your spreadsheet, runs the automation against it, and shows you a preview sheet to review. Your live data is never modified until you explicitly approve the result.\n\nFree tier: 1 automation, 10 total runs. Pro tier: unlimited automations and runs, preview-before-activate workflow, and scheduling. Agency tier: everything in Pro plus GitHub version control for all automations. Subscribe at https://thedatastudents.com/automategs\n\nYour automations run in your own Google account. AutomateGS never stores or accesses your data.",
   "author": {
