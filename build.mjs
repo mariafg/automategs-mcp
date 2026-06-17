@@ -98,6 +98,45 @@ writeFileSync(join(__dirname, 'dist/index.mjs'), obfuscated.getObfuscatedCode())
 
 console.log('Obfuscation complete');
 
+// 3b. Write a tiny, unbundled, unobfuscated launcher as the real entry point.
+//     This exists purely for diagnostics: if dist/index.mjs ever fails during
+//     its own module evaluation (a SyntaxError from a Node-version mismatch,
+//     a native module ABI mismatch, etc.), a *static* import of it would
+//     crash the whole process before any of our own console.error/dbg calls
+//     inside index.mjs get a chance to run — which is exactly why earlier
+//     crashes showed up as total silence in the MCP logs. Loading it via
+//     dynamic import() instead means a throw during evaluation surfaces as a
+//     rejected promise we can catch right here and log, with the running
+//     version/build time printed unconditionally first.
+const launcherSrc = [
+  "import fs from 'fs';",
+  "import { dirname, join } from 'path';",
+  "import { fileURLToPath } from 'url';",
+  '',
+  "const __dirname = dirname(fileURLToPath(import.meta.url));",
+  `const VERSION = ${JSON.stringify(pkg.version)};`,
+  `const BUILD_TIME = ${JSON.stringify(buildTime)};`,
+  "const DBG_LOG = '/tmp/automategs-debug.log';",
+  'function dbg(msg) { try { fs.appendFileSync(DBG_LOG, `${new Date().toISOString()} [launcher] ${msg}\\n`); } catch {} }',
+  '',
+  'console.error(`[AutomateGS] launcher starting — v${VERSION} built ${BUILD_TIME} — node ${process.version} — pid ${process.pid}`);',
+  'dbg(`launcher starting v${VERSION} built ${BUILD_TIME} node ${process.version} pid ${process.pid} execPath ${process.execPath} platform ${process.platform} arch ${process.arch}`);',
+  '',
+  'try {',
+  "  await import(join(__dirname, 'index.mjs'));",
+  "  dbg('launcher: index.mjs loaded and ran without throwing during import');",
+  '} catch (err) {',
+  '  const detail = err && err.stack ? err.stack : String(err);',
+  '  console.error(`[AutomateGS] FATAL: index.mjs failed to load (v${VERSION})`);',
+  '  console.error(detail);',
+  "  dbg(`launcher: FATAL index.mjs failed to load: ${detail}`);",
+  '  process.exitCode = 1;',
+  '}',
+  '',
+].join('\n');
+writeFileSync(join(__dirname, 'dist/launcher.mjs'), launcherSrc);
+console.log('Wrote launcher.mjs');
+
 // 4. Copy manifest.json, CLAUDE.md, icon.png to dist/
 const filesToCopy = ['manifest.json', 'CLAUDE.md', 'icon.png'];
 for (const file of filesToCopy) {
