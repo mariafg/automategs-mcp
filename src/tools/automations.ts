@@ -20,7 +20,7 @@ import {
   deployFunctionCode,
   callWebApp,
 } from './common.js';
-import { DEFAULT_SCOPES } from '../gas/template.js';
+import { DEFAULT_SCOPES, ALL_SCOPES } from '../gas/template.js';
 
 const ASYNC_EXECUTIONS = new Map<string, { status: string; result?: unknown; error?: string }>();
 
@@ -170,7 +170,7 @@ export const handlers: Record<
       setupComplete: true,
       createdAt: now,
       lastDeployed: now,
-      authorizedScopes: [...DEFAULT_SCOPES],
+      authorizedScopes: [...ALL_SCOPES],
     };
 
     registry.projects[id] = project;
@@ -230,18 +230,21 @@ export const handlers: Record<
     }
     project.lastDeployed = now;
 
-    // Google requires the script owner to re-consent whenever a deployment
-    // starts using a scope it didn't already have authorization for (e.g.
-    // adding Gmail send permission to a script that previously only touched
-    // Sheets). Opening the deployed /exec web app URL does NOT trigger this
-    // consent screen: with executeAs USER_DEPLOYING + access ANYONE_ANONYMOUS,
-    // hitting /exec just runs the script immediately, and the unauthorized
-    // API call throws *inside* doPost's try/catch (see system-functions.ts),
-    // which gets serialized as a normal `{success:false, error:...}` JSON
-    // response rather than surfacing an HTML auth page. Google's dedicated
-    // script-authorization endpoint shows just the OAuth consent screen for
-    // the script's declared scopes (no code editor UI involved).
-    const requiredScopes = [...DEFAULT_SCOPES, ...oauthScopes];
+    // Every script's manifest always declares ALL_SCOPES (see
+    // buildAppsScriptManifest), so in practice this almost never fires —
+    // the one authorization the owner does at create_automation time
+    // already covers everything. This stays as a safety net for the rare
+    // case a function needs a scope outside that fixed set. Google requires
+    // the script owner to re-consent whenever a deployment starts using a
+    // scope it didn't already have authorization for; opening the deployed
+    // /exec web app URL does NOT trigger that consent screen (executeAs
+    // USER_DEPLOYING + access ANYONE_ANONYMOUS just runs the script
+    // immediately, and the unauthorized API call throws *inside* doPost's
+    // try/catch — see system-functions.ts — serializing as a normal
+    // `{success:false, error:...}` JSON response rather than an HTML auth
+    // page). Google's dedicated script-authorization endpoint shows just
+    // the OAuth consent screen for the script's declared scopes.
+    const requiredScopes = [...ALL_SCOPES, ...oauthScopes];
     const authorizedScopes = project.authorizedScopes ?? [...DEFAULT_SCOPES];
     const newScopes = requiredScopes.filter((s) => !authorizedScopes.includes(s));
     const reauthRequired = newScopes.length > 0;

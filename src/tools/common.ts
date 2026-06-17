@@ -136,15 +136,17 @@ export async function finishProjectSetup(
   }
 
   const webAppUrl = `https://script.google.com/macros/s/${deploymentId}/exec`;
+  const authorizeUrl = `https://script.google.com/macros/d/${scriptId}/authorize`;
 
-  // Open the web app URL in the browser immediately after deployment so the
-  // owner can complete the one-time Google script-project authorization.
-  // Without this step Google returns 403 when the web app tries to execute
-  // on the owner's behalf.  Best-effort — don't block on failure.
-  open(webAppUrl).catch(() => {
-    console.error(`[AutomateGS] Could not auto-open browser. Please visit: ${webAppUrl}`);
+  // Open Google's dedicated script-authorization screen immediately after
+  // the initial deployment so the owner can complete the one-time consent
+  // for every scope this project will ever need (see ALL_SCOPES). Without
+  // this step Google returns 403 when the web app tries to execute on the
+  // owner's behalf.  Best-effort — don't block on failure.
+  open(authorizeUrl).catch(() => {
+    console.error(`[AutomateGS] Could not auto-open browser. Please visit: ${authorizeUrl}`);
   });
-  console.error(`[AutomateGS] Opened browser for web app authorization: ${webAppUrl}`);
+  console.error(`[AutomateGS] Opened browser for script authorization: ${authorizeUrl}`);
 
   return { scriptId, webAppUrl, localPath, deploymentId };
 }
