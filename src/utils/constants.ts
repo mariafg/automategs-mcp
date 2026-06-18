@@ -1,8 +1,27 @@
+import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import type { Tier } from '../registry/types.js';
 
-export const CONFIG_DIR = path.join(os.homedir(), '.config', 'automategs');
+// Some machines have a root-owned ~/.config (commonly left behind by an
+// earlier `sudo npm install -g` or similar), which makes the otherwise
+// standard ~/.config/automategs location unwritable for the actual user
+// and crashes the whole server on startup. Fall back to ~/.automategs
+// (already used elsewhere for the portable Node install) when that happens.
+function resolveConfigDir(): string {
+  const primary = path.join(os.homedir(), '.config', 'automategs');
+  try {
+    fs.mkdirSync(primary, { recursive: true });
+    fs.accessSync(primary, fs.constants.W_OK);
+    return primary;
+  } catch {
+    const fallback = path.join(os.homedir(), '.automategs', 'config');
+    fs.mkdirSync(fallback, { recursive: true });
+    return fallback;
+  }
+}
+
+export const CONFIG_DIR = resolveConfigDir();
 export const SCRIPTS_DIR = path.join(CONFIG_DIR, 'scripts');
 export const REGISTRY_PATH = path.join(CONFIG_DIR, 'projects.json');
 export const TEMPLATE_CACHE_PATH = path.join(CONFIG_DIR, 'template-cache.json');
