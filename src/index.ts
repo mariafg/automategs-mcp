@@ -3,11 +3,15 @@
 // executable statement so it takes effect even if later async code is slow.
 process.stdin.resume();
 
-// File-based debug logger — writes to /tmp so it's visible even when the DXT
-// runner doesn't forward stderr to the MCP log.
+// File-based debug logger — writes to the OS temp dir so it's visible even
+// when the DXT runner doesn't forward stderr to the MCP log. A hardcoded
+// '/tmp/...' silently fails on Windows (no /tmp by default).
 import fs from 'fs';
+import os from 'os';
+import path from 'path';
+const _DEBUG_LOG_PATH = path.join(os.tmpdir(), 'automategs-debug.log');
 const _dbg = (msg: string) => {
-  try { fs.appendFileSync('/tmp/automategs-debug.log', `${new Date().toISOString()} ${msg}\n`); } catch {}
+  try { fs.appendFileSync(_DEBUG_LOG_PATH, `${new Date().toISOString()} ${msg}\n`); } catch {}
 };
 _dbg(`PROCESS START pid=${process.pid} node=${process.execPath}`);
 // Build version is injected at compile time — log it immediately so the
@@ -232,10 +236,10 @@ console.error(`[AutomateGS]       Transport connected — MCP handshake ready`);
 // Debug: log if stdin closes unexpectedly so we can diagnose crashes in
 // DXT environments where stderr is not forwarded to the MCP log.
 process.stdin.once('end', () => {
-  try { fs.appendFileSync('/tmp/automategs-debug.log', `${new Date().toISOString()} stdin EOF\n`); } catch {}
+  try { fs.appendFileSync(_DEBUG_LOG_PATH, `${new Date().toISOString()} stdin EOF\n`); } catch {}
 });
 process.stdin.once('close', () => {
-  try { fs.appendFileSync('/tmp/automategs-debug.log', `${new Date().toISOString()} stdin CLOSE\n`); } catch {}
+  try { fs.appendFileSync(_DEBUG_LOG_PATH, `${new Date().toISOString()} stdin CLOSE\n`); } catch {}
 });
 
 // ---------------------------------------------------------------------------

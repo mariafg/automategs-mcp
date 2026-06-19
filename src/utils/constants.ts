@@ -27,6 +27,11 @@ export const REGISTRY_PATH = path.join(CONFIG_DIR, 'projects.json');
 export const TEMPLATE_CACHE_PATH = path.join(CONFIG_DIR, 'template-cache.json');
 export const CLASPRC_PATH = path.join(os.homedir(), '.clasprc.json');
 
+// Cross-platform debug log location. A hardcoded '/tmp/...' silently fails
+// on Windows (no /tmp by default), which previously meant our main
+// diagnostic channel produced zero output on that platform.
+export const DEBUG_LOG_PATH = path.join(os.tmpdir(), 'automategs-debug.log');
+
 export const VALIDATION_URL =
   'https://script.google.com/macros/s/AKfycbxbkigI3_I3OWbqP9MyunTKGaF-cJtNirjm1F5xwlPjzC3lGzrzv9Ece731ajR7LLqPSg/exec';
 

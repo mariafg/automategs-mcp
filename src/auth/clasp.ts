@@ -6,7 +6,7 @@ import { spawn, execFile } from 'child_process';
 import { dirname, join, basename } from 'path';
 import { fileURLToPath } from 'url';
 import open from 'open';
-import { CLASPRC_PATH, CLASP_CLIENT_ID, CLASP_CLIENT_SECRET } from '../utils/constants.js';
+import { CLASPRC_PATH, CLASP_CLIENT_ID, CLASP_CLIENT_SECRET, DEBUG_LOG_PATH } from '../utils/constants.js';
 import { findAvailablePort } from '../utils/port.js';
 
 // clasp-cli.mjs is bundled alongside index.js in dist/. The .mjs extension
@@ -14,7 +14,7 @@ import { findAvailablePort } from '../utils/port.js';
 // package.json nearby to declare "type": "module".
 const CLASP_CLI_PATH = join(dirname(fileURLToPath(import.meta.url)), 'clasp-cli.mjs');
 
-const DBG_LOG = '/tmp/automategs-debug.log';
+const DBG_LOG = DEBUG_LOG_PATH;
 function dbg(msg: string): void {
   try { fs.appendFileSync(DBG_LOG, `${new Date().toISOString()} [clasp] ${msg}\n`); } catch {}
 }
@@ -27,10 +27,17 @@ function dbg(msg: string): void {
 // ---------------------------------------------------------------------------
 const PORTABLE_NODE_VERSION = 'v20.18.1';
 const PORTABLE_NODE_DIR = join(os.homedir(), '.automategs', 'node');
-export const PORTABLE_NODE_BIN = join(PORTABLE_NODE_DIR, 'bin', 'node');
+// Windows node-*.zip releases put node.exe at the archive root; every other
+// platform's tarball nests it under bin/.
+export const PORTABLE_NODE_BIN = process.platform === 'win32'
+  ? join(PORTABLE_NODE_DIR, 'node.exe')
+  : join(PORTABLE_NODE_DIR, 'bin', 'node');
 
-function portableNodePlatformArch(): { platform: string; arch: string } {
-  const platform = process.platform === 'darwin' ? 'darwin' : process.platform === 'linux' ? 'linux' : null;
+function portableNodePlatformArch(): { platform: string; arch: string; ext: 'tar.gz' | 'zip' } {
+  const platform = process.platform === 'darwin' ? 'darwin'
+    : process.platform === 'linux' ? 'linux'
+    : process.platform === 'win32' ? 'win'
+    : null;
   const arch = process.arch === 'arm64' ? 'arm64' : process.arch === 'x64' ? 'x64' : null;
   if (!platform || !arch) {
     throw new Error(
@@ -38,7 +45,7 @@ function portableNodePlatformArch(): { platform: string; arch: string } {
       'Please install Node.js manually from https://nodejs.org.'
     );
   }
-  return { platform, arch };
+  return { platform, arch, ext: platform === 'win' ? 'zip' : 'tar.gz' };
 }
 
 /**
@@ -52,8 +59,8 @@ export async function installPortableNode(): Promise<string> {
     return PORTABLE_NODE_BIN;
   }
 
-  const { platform, arch } = portableNodePlatformArch();
-  const fileName = `node-${PORTABLE_NODE_VERSION}-${platform}-${arch}.tar.gz`;
+  const { platform, arch, ext } = portableNodePlatformArch();
+  const fileName = `node-${PORTABLE_NODE_VERSION}-${platform}-${arch}.${ext}`;
   const baseUrl = `https://nodejs.org/dist/${PORTABLE_NODE_VERSION}`;
 
   dbg(`installPortableNode: downloading ${baseUrl}/${fileName}`);
@@ -79,15 +86,37 @@ export async function installPortableNode(): Promise<string> {
   fs.rmSync(PORTABLE_NODE_DIR, { recursive: true, force: true });
   fs.mkdirSync(PORTABLE_NODE_DIR, { recursive: true });
 
-  const tmpTarball = join(os.tmpdir(), fileName);
-  fs.writeFileSync(tmpTarball, tarballBuf);
+  const tmpArchive = join(os.tmpdir(), fileName);
+  fs.writeFileSync(tmpArchive, tarballBuf);
 
-  await new Promise<void>((resolve, reject) => {
-    const tar = spawn('/usr/bin/tar', ['-xzf', tmpTarball, '-C', PORTABLE_NODE_DIR, '--strip-components=1']);
-    tar.on('error', reject);
-    tar.on('close', (code) => (code === 0 ? resolve() : reject(new Error(`tar exited with code ${code}`))));
-  });
-  fs.rmSync(tmpTarball, { force: true });
+  if (ext === 'zip') {
+    // Windows ships no `tar` that reliably handles .zip; PowerShell's
+    // Expand-Archive is present on every supported Windows version.
+    // It extracts into a single top-level node-vX.Y.Z-win-<arch> folder
+    // (there's no --strip-components equivalent), so extract to a staging
+    // dir first and move that folder's contents up into PORTABLE_NODE_DIR.
+    const stagingDir = join(os.tmpdir(), `automategs-node-extract-${Date.now()}`);
+    await new Promise<void>((resolve, reject) => {
+      const ps = spawn('powershell.exe', [
+        '-NoProfile', '-NonInteractive', '-Command',
+        `Expand-Archive -LiteralPath '${tmpArchive}' -DestinationPath '${stagingDir}' -Force`,
+      ]);
+      ps.on('error', reject);
+      ps.on('close', (code) => (code === 0 ? resolve() : reject(new Error(`Expand-Archive exited with code ${code}`))));
+    });
+    const extractedRoot = join(stagingDir, fileName.replace(/\.zip$/, ''));
+    for (const entry of fs.readdirSync(extractedRoot)) {
+      fs.renameSync(join(extractedRoot, entry), join(PORTABLE_NODE_DIR, entry));
+    }
+    fs.rmSync(stagingDir, { recursive: true, force: true });
+  } else {
+    await new Promise<void>((resolve, reject) => {
+      const tar = spawn('/usr/bin/tar', ['-xzf', tmpArchive, '-C', PORTABLE_NODE_DIR, '--strip-components=1']);
+      tar.on('error', reject);
+      tar.on('close', (code) => (code === 0 ? resolve() : reject(new Error(`tar exited with code ${code}`))));
+    });
+  }
+  fs.rmSync(tmpArchive, { force: true });
 
   if (!fs.existsSync(PORTABLE_NODE_BIN) || !nodeMinVersion(PORTABLE_NODE_BIN, 16)) {
     throw new Error('Node.js extraction did not produce a working binary.');
@@ -125,22 +154,38 @@ async function resolveNode(): Promise<string> {
 
   dbg(`resolveNode: process.execPath is NOT node (${process.execPath}), searching…`);
 
-  // Common fixed locations (macOS + Linux)
-  const homeDir = process.env.HOME ?? '';
+  // Common fixed locations
+  const homeDir = process.env.HOME ?? os.homedir();
   const candidates: string[] = [
     // Our own private install — see installPortableNode(). Checked first
     // since we know it's a real, version-checked Node we put there ourselves.
     PORTABLE_NODE_BIN,
-    '/opt/homebrew/bin/node',
-    '/usr/local/bin/node',
-    '/usr/bin/node',
-    '/opt/local/bin/node', // MacPorts
-    // nvm default active version symlink
-    `${homeDir}/.nvm/alias/default`,
-    `${homeDir}/.volta/bin/node`,
-    `${homeDir}/.asdf/shims/node`,
-    `${homeDir}/.local/share/fnm/aliases/default/bin/node`,
   ];
+
+  if (process.platform === 'win32') {
+    candidates.push(
+      // Default nodejs.org Windows installer location
+      `${process.env.ProgramFiles ?? 'C:\\Program Files'}\\nodejs\\node.exe`,
+      `${process.env['ProgramFiles(x86)'] ?? 'C:\\Program Files (x86)'}\\nodejs\\node.exe`,
+      // nvm-windows symlinks the active version here
+      `${process.env.ProgramFiles ?? 'C:\\Program Files'}\\nodejs\\node.exe`,
+      `${process.env.APPDATA ?? ''}\\npm\\node.exe`,
+      `${process.env.LOCALAPPDATA ?? ''}\\Programs\\nodejs\\node.exe`,
+      `${process.env.NVM_SYMLINK ?? ''}\\node.exe`,
+    );
+  } else {
+    candidates.push(
+      '/opt/homebrew/bin/node',
+      '/usr/local/bin/node',
+      '/usr/bin/node',
+      '/opt/local/bin/node', // MacPorts
+      // nvm default active version symlink
+      `${homeDir}/.nvm/alias/default`,
+      `${homeDir}/.volta/bin/node`,
+      `${homeDir}/.asdf/shims/node`,
+      `${homeDir}/.local/share/fnm/aliases/default/bin/node`,
+    );
+  }
 
   // Also probe nvm-style versioned paths
   const nvmDir = process.env.NVM_DIR ?? `${homeDir}/.nvm`;
@@ -167,9 +212,11 @@ async function resolveNode(): Promise<string> {
   // add Homebrew and nvm to PATH. Skip this if Xcode CLT isn't installed:
   // those rc files commonly shell out to git (prompt themes, version
   // managers), and without CLT present that would trigger macOS's
-  // "Install Command Line Developer Tools" dialog.
-  if (!hasXcodeCLT()) {
-    dbg('resolveNode: skipping login shell fallback (Xcode CLT not installed)');
+  // "Install Command Line Developer Tools" dialog. This is also a no-op
+  // on Windows, where there's no shell/SHELL concept worth probing and
+  // hasXcodeCLT() always returns false anyway.
+  if (process.platform !== 'darwin' || !hasXcodeCLT()) {
+    dbg('resolveNode: skipping login shell fallback (not macOS, or Xcode CLT not installed)');
   } else {
     const shell = process.env.SHELL ?? '/bin/sh';
     try {

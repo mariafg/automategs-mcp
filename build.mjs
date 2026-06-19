@@ -110,13 +110,14 @@ console.log('Obfuscation complete');
 //     version/build time printed unconditionally first.
 const launcherSrc = [
   "import fs from 'fs';",
+  "import os from 'os';",
   "import { dirname, join } from 'path';",
   "import { fileURLToPath } from 'url';",
   '',
   "const __dirname = dirname(fileURLToPath(import.meta.url));",
   `const VERSION = ${JSON.stringify(pkg.version)};`,
   `const BUILD_TIME = ${JSON.stringify(buildTime)};`,
-  "const DBG_LOG = '/tmp/automategs-debug.log';",
+  "const DBG_LOG = join(os.tmpdir(), 'automategs-debug.log');",
   'function dbg(msg) { try { fs.appendFileSync(DBG_LOG, `${new Date().toISOString()} [launcher] ${msg}\\n`); } catch {} }',
   '',
   'console.error(`[AutomateGS] launcher starting — v${VERSION} built ${BUILD_TIME} — node ${process.version} — pid ${process.pid}`);',
