@@ -112,7 +112,7 @@ const launcherSrc = [
   "import fs from 'fs';",
   "import os from 'os';",
   "import { dirname, join } from 'path';",
-  "import { fileURLToPath } from 'url';",
+  "import { fileURLToPath, pathToFileURL } from 'url';",
   '',
   "const __dirname = dirname(fileURLToPath(import.meta.url));",
   `const VERSION = ${JSON.stringify(pkg.version)};`,
@@ -124,7 +124,11 @@ const launcherSrc = [
   'dbg(`launcher starting v${VERSION} built ${BUILD_TIME} node ${process.version} pid ${process.pid} execPath ${process.execPath} platform ${process.platform} arch ${process.arch}`);',
   '',
   'try {',
-  "  await import(join(__dirname, 'index.mjs'));",
+  // Dynamic import() needs a file:// URL on Windows — a raw absolute path
+  // like 'C:\\...\\index.mjs' is rejected by the ESM loader with
+  // ERR_UNSUPPORTED_ESM_URL_SCHEME because it parses the drive letter as
+  // a URL scheme ('c:').
+  "  await import(pathToFileURL(join(__dirname, 'index.mjs')).href);",
   "  dbg('launcher: index.mjs loaded and ran without throwing during import');",
   '} catch (err) {',
   '  const detail = err && err.stack ? err.stack : String(err);',
