@@ -53,7 +53,7 @@ export const GITHUB_CLIENT_ID =
   process.env.GITHUB_CLIENT_ID ?? 'Ov23liVJN6wyWPstvcGu';
 
 export const TEMPLATE_REGISTRY_URL =
-  'https://thedatastudents.github.io/automategs-templates/registry.json';
+  'https://raw.githubusercontent.com/thedatastudents/automategs-templates/main/registry.json';
 export const TEMPLATE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
 export const MAX_OUTPUT_LINES = 1000;
