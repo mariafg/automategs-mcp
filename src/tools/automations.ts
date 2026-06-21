@@ -20,7 +20,7 @@ import {
   deployFunctionCode,
   callWebApp,
 } from './common.js';
-import { DEFAULT_SCOPES, ALL_SCOPES } from '../gas/template.js';
+import { DEFAULT_SCOPES } from '../gas/template.js';
 
 const ASYNC_EXECUTIONS = new Map<string, { status: string; result?: unknown; error?: string }>();
 
@@ -34,10 +34,14 @@ export const tools = [
   {
     name: 'create_automation',
     description:
-      'Create a Google Apps Script project for any Google Sheets or Google Workspace task. ' +
-      'Use this whenever the user wants to: write or paste data into a Google Sheet, populate or create a sheet, ' +
-      'read/extract/transform sheet data, send emails, create calendar events, or automate any Google Workspace operation. ' +
-      'This is the FIRST step — call it before update_automation.',
+      'Create a Google Apps Script project for any Google Sheets or Google Workspace task — ' +
+      'writing/pasting data into a Sheet, reading/extracting/transforming sheet data, sending emails, ' +
+      'creating calendar events, or any other Google Workspace operation. ' +
+      'IMPORTANT: call list_templates first — common tasks like "read/write a Google Sheet" or ' +
+      '"send an email" are often already covered by a ready-made template (use add_template instead, ' +
+      'no custom code needed), even if the user never says the word "template". ' +
+      'Only use create_automation when no template matches and custom code is required. ' +
+      'This is the FIRST step for custom code — call it before update_automation.',
     inputSchema: {
       type: 'object',
       required: ['displayName'],
@@ -170,7 +174,7 @@ export const handlers: Record<
       setupComplete: true,
       createdAt: now,
       lastDeployed: now,
-      authorizedScopes: [...ALL_SCOPES],
+      authorizedScopes: [...DEFAULT_SCOPES],
     };
 
     registry.projects[id] = project;
@@ -230,21 +234,21 @@ export const handlers: Record<
     }
     project.lastDeployed = now;
 
-    // Every script's manifest always declares ALL_SCOPES (see
-    // buildAppsScriptManifest), so in practice this almost never fires —
-    // the one authorization the owner does at create_automation time
-    // already covers everything. This stays as a safety net for the rare
-    // case a function needs a scope outside that fixed set. Google requires
-    // the script owner to re-consent whenever a deployment starts using a
-    // scope it didn't already have authorization for; opening the deployed
-    // /exec web app URL does NOT trigger that consent screen (executeAs
-    // USER_DEPLOYING + access ANYONE_ANONYMOUS just runs the script
-    // immediately, and the unauthorized API call throws *inside* doPost's
-    // try/catch — see system-functions.ts — serializing as a normal
-    // `{success:false, error:...}` JSON response rather than an HTML auth
-    // page). Google's dedicated script-authorization endpoint shows just
-    // the OAuth consent screen for the script's declared scopes.
-    const requiredScopes = [...ALL_SCOPES, ...oauthScopes];
+    // The manifest only declares DEFAULT_SCOPES plus whatever oauthScopes
+    // this call passes in (see buildAppsScriptManifest) — scopes are minimal,
+    // not a fixed superset, so adding a new Google service to a function
+    // (e.g. Gmail to a Sheets-only automation) genuinely changes what's
+    // declared and requires re-consent. Google requires the script owner to
+    // re-consent whenever a deployment starts using a scope it didn't already
+    // have authorization for; opening the deployed /exec web app URL does NOT
+    // trigger that consent screen (executeAs USER_DEPLOYING + access
+    // ANYONE_ANONYMOUS just runs the script immediately, and the unauthorized
+    // API call throws *inside* doPost's try/catch — see system-functions.ts —
+    // serializing as a normal `{success:false, error:...}` JSON response
+    // rather than an HTML auth page). Google's dedicated script-authorization
+    // endpoint shows just the OAuth consent screen for the script's declared
+    // scopes.
+    const requiredScopes = [...DEFAULT_SCOPES, ...oauthScopes];
     const authorizedScopes = project.authorizedScopes ?? [...DEFAULT_SCOPES];
     const newScopes = requiredScopes.filter((s) => !authorizedScopes.includes(s));
     const reauthRequired = newScopes.length > 0;

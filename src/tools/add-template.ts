@@ -13,6 +13,7 @@ import {
   deployFunctionCode,
 } from './common.js';
 import { fetchTemplateRegistry, filterByTier } from './templates.js';
+import { DEFAULT_SCOPES } from '../gas/template.js';
 
 export const tools = [
   {
@@ -82,6 +83,7 @@ export const handlers: Record<
       setupComplete: true,
       createdAt: now,
       lastDeployed: now,
+      authorizedScopes: [...new Set([...DEFAULT_SCOPES, ...template.requiredScopes])],
     };
 
     // 5. Deploy the template function (same logic as update_automation)

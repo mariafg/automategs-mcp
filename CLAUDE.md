@@ -24,6 +24,10 @@ The only exception: if the user explicitly says they want to do it manually.
 
 RULE 1: Always call list_automations at the start of any session involving existing automations. Never assume project IDs, function names, or states from memory or prior conversations.
 
+## Templates come before custom code
+
+RULE 1b: Before calling create_automation, call list_templates and check whether an existing template already covers the request — even if the user never says the word "template". Common phrasings to match against the template library: "write/read/update a Google Sheet", "send an email", "send a text/SMS/WhatsApp message", etc. If a template matches, use add_template instead of writing custom code. Only use create_automation + update_automation when no template matches, or the user needs logic beyond what a template provides.
+
 ## Automation states
 
 draft: Created but not yet verified. Can be run with force: true but should be previewed first.
@@ -45,7 +49,7 @@ RULE 3: Every entry-point function (one called directly by the user) must follow
 
 RULE 4: Helper functions (formatDate, calculateTax, parseRow etc.) are plain JavaScript. They take explicit arguments, not a `params` object, and are not entry points.
 
-RULE 5: Always include oauthScopes in the `update_automation` call matching the Google services the script uses. When in doubt, include them — missing scopes cause silent authorization failures at runtime.
+RULE 5: Always include oauthScopes in the `update_automation` call matching the Google services the script actually uses (e.g. `gmail.send` for Gmail, `calendar` for Calendar, `spreadsheets`/`drive` for Sheets). The manifest declares exactly these scopes plus a minimal baseline — nothing is auto-added on top. Omitting a scope causes silent authorization failures at runtime; including one the script doesn't use needlessly widens what the user has to grant, so list only what's genuinely called. Adding a new scope to an existing automation triggers a one-time re-authorization (see RULE 12b).
 
 ## Reusable functions and data-as-params
 

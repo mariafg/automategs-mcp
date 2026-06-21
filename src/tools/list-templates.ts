@@ -5,7 +5,11 @@ export const tools = [
   {
     name: 'list_templates',
     description:
-      'Browse ready-made automations from the AutomateGS template library. Templates let you get started in seconds without writing any code.',
+      'Browse ready-made automations from the AutomateGS template library. Templates let you get started in seconds ' +
+      'without writing any code. Call this BEFORE create_automation for any Google Sheets, Gmail, or messaging task — ' +
+      'common requests like "write to a sheet", "read a sheet", "send an email", or "send a text/SMS" are often already ' +
+      'covered by a template, even if the user never says "template". Only fall back to create_automation when no ' +
+      'template matches.',
     inputSchema: {
       type: 'object',
       properties: {

@@ -139,10 +139,12 @@ export async function finishProjectSetup(
   const authorizeUrl = `https://script.google.com/macros/d/${scriptId}/authorize`;
 
   // Open Google's dedicated script-authorization screen immediately after
-  // the initial deployment so the owner can complete the one-time consent
-  // for every scope this project will ever need (see ALL_SCOPES). Without
-  // this step Google returns 403 when the web app tries to execute on the
-  // owner's behalf.  Best-effort — don't block on failure.
+  // the initial deployment so the owner can consent to the scopes declared
+  // so far (DEFAULT_SCOPES + oauthScopes). Without this step Google returns
+  // 403 when the web app tries to execute on the owner's behalf. Later
+  // update_automation calls that introduce new scopes trigger this same
+  // screen again — see the reauthRequired logic in automations.ts.
+  // Best-effort — don't block on failure.
   open(authorizeUrl).catch(() => {
     console.error(`[AutomateGS] Could not auto-open browser. Please visit: ${authorizeUrl}`);
   });
