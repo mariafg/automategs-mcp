@@ -35,7 +35,9 @@ staged: Has been previewed. Awaiting activation.
 crystallised (active): Human-approved. Safe for production use and scheduling.
 deprecated: Do not run. Superseded by a newer version.
 
-RULE 1c: When the user wants to remove, delete, or get rid of an automation, call delete_automation with the projectId — never tell them to do it manually. This trashes the underlying Apps Script project in Drive (recoverable for 30 days) and frees up the free-tier automation slot. Confirm with the user which automation they mean (use list_automations if unsure) before deleting, since this cannot be undone from within AutomateGS itself.
+## Removing an automation
+
+RULE 1c: If the user wants to delete, remove, or get rid of an automation, call delete_automation with the projectId — never tell them to do it manually. This trashes the underlying Apps Script project in Drive (recoverable for 30 days) and frees up the free-tier slot. Confirm which automation they mean (use list_automations if unsure) before calling it, since this is not easily undone from within AutomateGS.
 
 RULE 2: Running draft automations is fine — it is the standard flow for free-tier users. You do not need explicit instruction or force: true to run a draft. On Pro/Agency, prefer the preview workflow for write operations, but never block on it without asking the user.
 

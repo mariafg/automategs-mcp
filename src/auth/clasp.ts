@@ -297,13 +297,14 @@ interface ClaspRcV3 {
   };
 }
 
-// Scopes matching what @google/clasp requests
+// Scopes matching what @google/clasp requests, plus the broad Drive scope
+// (not drive.file — see trashScriptProject below for why) needed to trash
+// script projects by file ID.
 const CLASP_SCOPES = [
   'https://www.googleapis.com/auth/script.projects',
   'https://www.googleapis.com/auth/script.webapp.deploy',
   'https://www.googleapis.com/auth/script.deployments',
-  'https://www.googleapis.com/auth/drive.metadata.readonly',
-  'https://www.googleapis.com/auth/drive.file',
+  'https://www.googleapis.com/auth/drive',
   'https://www.googleapis.com/auth/service.management',
   'https://www.googleapis.com/auth/logging.read',
   'https://www.googleapis.com/auth/userinfo.email',
@@ -361,13 +362,30 @@ export async function getAccessToken(): Promise<string> {
   return updatedToken.access_token;
 }
 
+function hasGrantedScope(scope: string): boolean {
+  try {
+    const rc = JSON.parse(fs.readFileSync(CLASPRC_PATH, 'utf8')) as ClaspRcV3;
+    const granted = rc.tokens.default?.scope ?? '';
+    return granted.split(' ').includes(scope);
+  } catch {
+    return false;
+  }
+}
+
 // A standalone Apps Script project's scriptId is also its Drive file ID.
 // Trashing it (rather than permanently deleting) lets the owner recover it
-// from Drive's trash within Google's normal 30-day window. clasp's own
-// OAuth token already carries the drive.file scope it used to create the
-// project in the first place (see CLASP_SCOPES), so no extra consent is
-// needed for files clasp itself created.
+// from Drive's trash within Google's normal 30-day window. This requires the
+// broad drive scope: drive.file only covers files created/opened through the
+// Drive API itself, and project creation goes through the Apps Script API
+// instead, so files clasp creates aren't covered by drive.file. Accounts
+// that authenticated before drive scope was added to CLASP_SCOPES need a
+// one-time re-consent — detect that here and run it inline rather than
+// failing, so the trash silently starts working again after this first call.
 export async function trashScriptProject(scriptId: string): Promise<void> {
+  if (!hasGrantedScope('https://www.googleapis.com/auth/drive')) {
+    await runClaspLoginBrowser();
+  }
+
   const token = await getAccessToken();
   const res = await fetch(`https://www.googleapis.com/drive/v3/files/${scriptId}`, {
     method: 'PATCH',
