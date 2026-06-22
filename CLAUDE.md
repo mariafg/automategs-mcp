@@ -39,6 +39,8 @@ deprecated: Do not run. Superseded by a newer version.
 
 RULE 1c: If the user wants to delete, remove, or get rid of an automation, call delete_automation with the projectId — never tell them to do it manually. This trashes the underlying Apps Script project in Drive (recoverable for 30 days) and frees up the free-tier slot. Confirm which automation they mean (use list_automations if unsure) before calling it, since this is not easily undone from within AutomateGS.
 
+RULE 1d: If delete_automation returns `status: 'drive_reauth_required'` with an `authUrl`, the automation has NOT been deleted yet — a one-time Google re-authorization is needed first. Tell the user to open the URL and sign in with the SAME Google account they use for AutomateGS (signing in with a different account will be rejected, not silently accepted, so their existing credentials stay safe). Once they confirm, call delete_automation again with the same projectId to retry. Do not call it again before they confirm — the sign-in needs to complete first.
+
 RULE 2: Running draft automations is fine — it is the standard flow for free-tier users. You do not need explicit instruction or force: true to run a draft. On Pro/Agency, prefer the preview workflow for write operations, but never block on it without asking the user.
 
 ## Writing automation code

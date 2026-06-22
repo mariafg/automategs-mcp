@@ -10,7 +10,7 @@ import {
   incrementExecution,
   removeProject,
 } from '../registry/projects.js';
-import { trashScriptProject } from '../auth/clasp.js';
+import { trashScriptProject, DriveScopeRequiredError, startDriveReauth, getDriveReauthUrl } from '../auth/clasp.js';
 import type { ProjectRecord, FunctionRecord } from '../registry/types.js';
 import { SCRIPTS_DIR, FREE_TIER_EXECUTION_LIMIT, UPGRADE_URL } from '../utils/constants.js';
 import {
@@ -107,7 +107,9 @@ export const tools = [
     description:
       'Permanently remove an automation: deletes it from AutomateGS, trashes the underlying Google Apps Script ' +
       'project in Drive (recoverable from Drive trash for 30 days), and frees up the free-tier automation slot. ' +
-      'Use this whenever the user wants to delete, remove, or get rid of an automation.',
+      'Use this whenever the user wants to delete, remove, or get rid of an automation. ' +
+      'May return status:drive_reauth_required with an authUrl on the first delete after this feature was added — ' +
+      'tell the user to open that URL and sign in with their AutomateGS Google account, then ask you to delete again.',
     inputSchema: {
       type: 'object',
       required: ['projectId'],
@@ -453,11 +455,38 @@ export const handlers: Record<
     }
 
     let trashed = false;
+    let reauthUrl: string | null = null;
     try {
       await trashScriptProject(project.scriptId);
       trashed = true;
     } catch (err) {
-      console.error(`[AutomateGS] Could not trash Drive file for "${projectId}": ${err}`);
+      if (err instanceof DriveScopeRequiredError) {
+        // Don't await full sign-in here — that would block this tool call
+        // on the user completing a browser flow. Kick it off, grab the URL
+        // once the local callback server is listening, and let the user
+        // retry the delete once they've signed in.
+        startDriveReauth().catch(() => { /* surfaced via console.error inside startDriveReauth */ });
+        for (let i = 0; i < 30 && !getDriveReauthUrl(); i++) {
+          await new Promise((r) => setTimeout(r, 100));
+        }
+        reauthUrl = getDriveReauthUrl();
+      } else {
+        console.error(`[AutomateGS] Could not trash Drive file for "${projectId}": ${err}`);
+      }
+    }
+
+    if (reauthUrl) {
+      // Leave the project in the registry untouched so a retry with the
+      // same projectId can find it again — it has NOT been removed yet.
+      return text({
+        success: false,
+        projectId,
+        displayName: project.displayName,
+        driveFileTrashed: false,
+        status: 'drive_reauth_required',
+        authUrl: reauthUrl,
+        message: `"${project.displayName}" has NOT been deleted yet. A one-time Google re-authorization is needed before AutomateGS can trash the underlying Apps Script project. Please open this URL and sign in with the SAME Google account you use for AutomateGS:\n\n${reauthUrl}\n\nOnce you've completed it, ask me to delete it again and I'll retry (script ID: ${project.scriptId}).`,
+      });
     }
 
     fs.rmSync(project.localPath, { recursive: true, force: true });
@@ -470,7 +499,7 @@ export const handlers: Record<
       driveFileTrashed: trashed,
       message: trashed
         ? `"${project.displayName}" deleted. The underlying Apps Script project was moved to Drive trash (recoverable for 30 days).`
-        : `"${project.displayName}" removed from AutomateGS, but the underlying Apps Script project could not be trashed automatically — you may want to delete it manually from Drive.`,
+        : `"${project.displayName}" removed from AutomateGS, but the underlying Apps Script project could not be trashed automatically — you may want to delete it manually from Drive (script ID: ${project.scriptId}).`,
     });
   },
 };

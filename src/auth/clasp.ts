@@ -281,6 +281,7 @@ interface ClaspToken {
   expiry_date: number;
   token_type?: string;
   scope?: string;
+  email?: string;
 }
 
 // clasp v3's on-disk credential format: a map of user keys (we only ever
@@ -372,6 +373,40 @@ function hasGrantedScope(scope: string): boolean {
   }
 }
 
+// Thrown by trashScriptProject when the stored clasp token predates the
+// 'drive' scope being added to CLASP_SCOPES. Callers should surface
+// startDriveReauth()'s URL to the user instead of treating this as a
+// generic failure — see startDriveReauth below.
+export class DriveScopeRequiredError extends Error {}
+
+let driveReauthUrl: string | null = null;
+let driveReauthPromise: Promise<void> | null = null;
+
+export function getDriveReauthUrl(): string | null {
+  return driveReauthUrl;
+}
+
+// Kicks off (or reuses an in-flight) one-time re-consent for the broad
+// 'drive' scope, without blocking the caller on the full OAuth round trip.
+// The auth URL becomes available via getDriveReauthUrl() shortly after this
+// returns — callers should surface it to the user and ask them to retry the
+// original action once they've signed in.
+export function startDriveReauth(): Promise<void> {
+  if (!driveReauthPromise) {
+    driveReauthUrl = null;
+    driveReauthPromise = runClaspLoginBrowser((url) => { driveReauthUrl = url; })
+      .catch((err) => {
+        console.error(`[AutomateGS] Drive re-authentication failed: ${err}`);
+        throw err;
+      })
+      .finally(() => {
+        driveReauthPromise = null;
+        driveReauthUrl = null;
+      });
+  }
+  return driveReauthPromise;
+}
+
 // A standalone Apps Script project's scriptId is also its Drive file ID.
 // Trashing it (rather than permanently deleting) lets the owner recover it
 // from Drive's trash within Google's normal 30-day window. This requires the
@@ -379,11 +414,15 @@ function hasGrantedScope(scope: string): boolean {
 // Drive API itself, and project creation goes through the Apps Script API
 // instead, so files clasp creates aren't covered by drive.file. Accounts
 // that authenticated before drive scope was added to CLASP_SCOPES need a
-// one-time re-consent — detect that here and run it inline rather than
-// failing, so the trash silently starts working again after this first call.
+// one-time re-consent — see startDriveReauth above. We never trigger the
+// browser login inline here: that used to block the MCP tool call with no
+// way to tell the caller what was happening, and a wrong-account sign-in
+// would silently clobber working credentials.
 export async function trashScriptProject(scriptId: string): Promise<void> {
   if (!hasGrantedScope('https://www.googleapis.com/auth/drive')) {
-    await runClaspLoginBrowser();
+    throw new DriveScopeRequiredError(
+      'Drive scope not granted yet; one-time re-authentication required.',
+    );
   }
 
   const token = await getAccessToken();
@@ -515,6 +554,27 @@ export async function runClaspLoginBrowser(onUrl?: (url: string) => void): Promi
     scope: string;
   };
 
+  const newEmail = await fetchUserEmail(tokens.access_token);
+
+  // If we already have working credentials for a different Google account,
+  // refuse to overwrite them. Without this check, picking the wrong account
+  // in the consent screen silently replaces good credentials with ones for
+  // an account that doesn't own any of the user's existing automations —
+  // breaking every subsequent call with no obvious cause.
+  let previousEmail: string | null = null;
+  if (fs.existsSync(CLASPRC_PATH)) {
+    try {
+      const existingRc = JSON.parse(fs.readFileSync(CLASPRC_PATH, 'utf8')) as ClaspRcV3;
+      previousEmail = existingRc.tokens.default?.email ?? null;
+    } catch { /* ignore unreadable/corrupt file */ }
+  }
+  if (previousEmail && newEmail && previousEmail !== newEmail) {
+    throw new Error(
+      `Signed in as ${newEmail}, but AutomateGS is already connected to ${previousEmail}. ` +
+      `Please retry and sign in with ${previousEmail} instead.`,
+    );
+  }
+
   const claspRc: ClaspRcV3 = {
     tokens: {
       default: {
@@ -524,6 +584,7 @@ export async function runClaspLoginBrowser(onUrl?: (url: string) => void): Promi
         expiry_date: Date.now() + tokens.expires_in * 1000,
         token_type: tokens.token_type,
         scope: tokens.scope,
+        email: newEmail ?? undefined,
         client_id: CLASP_CLIENT_ID,
         client_secret: CLASP_CLIENT_SECRET,
       },
@@ -532,6 +593,19 @@ export async function runClaspLoginBrowser(onUrl?: (url: string) => void): Promi
 
   fs.writeFileSync(CLASPRC_PATH, JSON.stringify(claspRc, null, 2));
   console.error('[AutomateGS] Google authentication complete.');
+}
+
+async function fetchUserEmail(accessToken: string): Promise<string | null> {
+  try {
+    const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!res.ok) return null;
+    const json = (await res.json()) as { email?: string };
+    return json.email ?? null;
+  } catch {
+    return null;
+  }
 }
 
 export async function testClaspConnection(): Promise<
