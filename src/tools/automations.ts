@@ -1,3 +1,4 @@
+import fs from 'fs';
 import path from 'path';
 import { execFile } from 'child_process';
 import open from 'open';
@@ -7,7 +8,9 @@ import {
   saveRegistry,
   checkFreeTierLimits,
   incrementExecution,
+  removeProject,
 } from '../registry/projects.js';
+import { trashScriptProject } from '../auth/clasp.js';
 import type { ProjectRecord, FunctionRecord } from '../registry/types.js';
 import { SCRIPTS_DIR, FREE_TIER_EXECUTION_LIMIT, UPGRADE_URL } from '../utils/constants.js';
 import {
@@ -96,6 +99,20 @@ export const tools = [
       required: ['executionId'],
       properties: {
         executionId: { type: 'string' },
+      },
+    },
+  },
+  {
+    name: 'delete_automation',
+    description:
+      'Permanently remove an automation: deletes it from AutomateGS, trashes the underlying Google Apps Script ' +
+      'project in Drive (recoverable from Drive trash for 30 days), and frees up the free-tier automation slot. ' +
+      'Use this whenever the user wants to delete, remove, or get rid of an automation.',
+    inputSchema: {
+      type: 'object',
+      required: ['projectId'],
+      properties: {
+        projectId: { type: 'string' },
       },
     },
   },
@@ -424,5 +441,36 @@ export const handlers: Record<
       });
     }
     return text({ executionId, ...entry });
+  },
+
+  delete_automation: async (args, _ctx) => {
+    const projectId = args.projectId as string;
+
+    const registry = loadRegistry();
+    const project = registry.projects[projectId];
+    if (!project) {
+      throw new McpError(ErrorCode.InvalidRequest, `Project "${projectId}" not found.`);
+    }
+
+    let trashed = false;
+    try {
+      await trashScriptProject(project.scriptId);
+      trashed = true;
+    } catch (err) {
+      console.error(`[AutomateGS] Could not trash Drive file for "${projectId}": ${err}`);
+    }
+
+    fs.rmSync(project.localPath, { recursive: true, force: true });
+    removeProject(projectId);
+
+    return text({
+      success: true,
+      projectId,
+      displayName: project.displayName,
+      driveFileTrashed: trashed,
+      message: trashed
+        ? `"${project.displayName}" deleted. The underlying Apps Script project was moved to Drive trash (recoverable for 30 days).`
+        : `"${project.displayName}" removed from AutomateGS, but the underlying Apps Script project could not be trashed automatically — you may want to delete it manually from Drive.`,
+    });
   },
 };

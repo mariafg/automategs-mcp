@@ -46,6 +46,12 @@ export function upsertProject(project: ProjectRecord): void {
   saveRegistry(registry);
 }
 
+export function removeProject(id: string): void {
+  const registry = loadRegistry();
+  delete registry.projects[id];
+  saveRegistry(registry);
+}
+
 export function getFunction(
   projectId: string,
   fnName: string,

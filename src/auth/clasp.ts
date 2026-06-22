@@ -361,6 +361,27 @@ export async function getAccessToken(): Promise<string> {
   return updatedToken.access_token;
 }
 
+// A standalone Apps Script project's scriptId is also its Drive file ID.
+// Trashing it (rather than permanently deleting) lets the owner recover it
+// from Drive's trash within Google's normal 30-day window. clasp's own
+// OAuth token already carries the drive.file scope it used to create the
+// project in the first place (see CLASP_SCOPES), so no extra consent is
+// needed for files clasp itself created.
+export async function trashScriptProject(scriptId: string): Promise<void> {
+  const token = await getAccessToken();
+  const res = await fetch(`https://www.googleapis.com/drive/v3/files/${scriptId}`, {
+    method: 'PATCH',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ trashed: true }),
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to trash Drive file ${scriptId}: HTTP ${res.status} ${await res.text()}`);
+  }
+}
+
 /**
  * Opens the Google OAuth consent screen in the user's browser,
  * starts a local HTTP server to receive the callback,
