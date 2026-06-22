@@ -13,7 +13,7 @@ import {
   deployFunctionCode,
 } from './common.js';
 import { fetchTemplateRegistry, filterByTier } from './templates.js';
-import { DEFAULT_SCOPES } from '../gas/template.js';
+import { DEFAULT_SCOPES, SPREADSHEETS_SCOPE, DRIVE_SCOPE } from '../gas/template.js';
 
 export const tools = [
   {
@@ -59,6 +59,14 @@ export const handlers: Record<
     // 3. Determine display name
     const displayName = (args.displayName as string | undefined) ?? template.name;
 
+    // usesSpreadsheet pulls in both scopes: spreadsheets for the template's own
+    // SpreadsheetApp calls, drive because preview_automation's staging-copy
+    // workflow (_agsMakeStagingCopy / _agsDeleteFile) needs it too. Defense in
+    // depth alongside whatever the template's own requiredScopes already lists.
+    const templateScopes = template.usesSpreadsheet
+      ? [...new Set([...template.requiredScopes, SPREADSHEETS_SCOPE, DRIVE_SCOPE])]
+      : template.requiredScopes;
+
     // 4. Create automation (same logic as create_automation)
     const registry = loadRegistry();
     checkFreeTierLimits(registry, 'create_project');
@@ -67,7 +75,7 @@ export const handlers: Record<
     const existing = Object.keys(registry.projects);
     const id = uniqueSlug(base, existing);
 
-    const setup = await runProjectSetup(id, displayName, template.requiredScopes);
+    const setup = await runProjectSetup(id, displayName, templateScopes);
 
     const now = new Date().toISOString();
     const project: ProjectRecord = {
@@ -83,7 +91,7 @@ export const handlers: Record<
       setupComplete: true,
       createdAt: now,
       lastDeployed: now,
-      authorizedScopes: [...new Set([...DEFAULT_SCOPES, ...template.requiredScopes])],
+      authorizedScopes: [...new Set([...DEFAULT_SCOPES, ...templateScopes])],
     };
 
     // 5. Deploy the template function (same logic as update_automation)
@@ -91,7 +99,7 @@ export const handlers: Record<
       project.localPath,
       template.entryFunctionName,
       template.scriptCode,
-      template.requiredScopes,
+      templateScopes,
       project.deploymentId,
     );
 

@@ -20,7 +20,7 @@ import {
   deployFunctionCode,
   callWebApp,
 } from './common.js';
-import { DEFAULT_SCOPES } from '../gas/template.js';
+import { DEFAULT_SCOPES, SPREADSHEETS_SCOPE, DRIVE_SCOPE } from '../gas/template.js';
 
 const ASYNC_EXECUTIONS = new Map<string, { status: string; result?: unknown; error?: string }>();
 
@@ -194,7 +194,13 @@ export const handlers: Record<
     const functionName = args.functionName as string;
     const functionCode = args.functionCode as string;
     const usesSpreadsheet = (args.usesSpreadsheet as boolean | undefined) ?? false;
-    const oauthScopes = (args.oauthScopes as string[] | undefined) ?? [];
+    const requestedScopes = (args.oauthScopes as string[] | undefined) ?? [];
+    // usesSpreadsheet pulls in both scopes: spreadsheets for the function's own
+    // SpreadsheetApp calls, drive because preview_automation's staging-copy
+    // workflow (_agsMakeStagingCopy / _agsDeleteFile) needs it too.
+    const oauthScopes = usesSpreadsheet
+      ? [...new Set([...requestedScopes, SPREADSHEETS_SCOPE, DRIVE_SCOPE])]
+      : requestedScopes;
 
     const registry = loadRegistry();
     const project = registry.projects[projectId];
@@ -248,7 +254,7 @@ export const handlers: Record<
     // rather than an HTML auth page). Google's dedicated script-authorization
     // endpoint shows just the OAuth consent screen for the script's declared
     // scopes.
-    const requiredScopes = [...DEFAULT_SCOPES, ...oauthScopes];
+    const requiredScopes = oauthScopes;
     const authorizedScopes = project.authorizedScopes ?? [...DEFAULT_SCOPES];
     const newScopes = requiredScopes.filter((s) => !authorizedScopes.includes(s));
     const reauthRequired = newScopes.length > 0;
