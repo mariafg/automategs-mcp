@@ -203,6 +203,31 @@ export async function deployFunctionCode(
   return newId ?? (deploymentId ?? '');
 }
 
+// Updates appsscript.json's oauthScopes only — no Code.gs change — then
+// pushes and redeploys. Used when an existing automation needs a scope it
+// didn't request when it was first written (e.g. delete_automation adding
+// DRIVE_SCOPE so the script can trash its own Drive file via _agsDeleteFile).
+export async function ensureManifestScopes(
+  localPath: string,
+  oauthScopes: string[],
+  deploymentId?: string,
+): Promise<string> {
+  fs.writeFileSync(
+    path.join(localPath, 'appsscript.json'),
+    JSON.stringify(buildAppsScriptManifest([...DEFAULT_SCOPES, ...oauthScopes]), null, 2),
+    'utf8',
+  );
+
+  await runClasp(['push', '--force'], localPath);
+
+  const deployArgs = deploymentId
+    ? ['deploy', '--deploymentId', deploymentId, '--description', 'AutomateGS update']
+    : ['deploy', '--description', 'AutomateGS update'];
+  const deployOut = await runClasp(deployArgs, localPath);
+  const newId = parseDeploymentId(deployOut);
+  return newId ?? (deploymentId ?? '');
+}
+
 function findFunctionEnd(code: string): number {
   let depth = 0;
   let inString = false;

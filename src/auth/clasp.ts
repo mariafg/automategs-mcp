@@ -298,14 +298,19 @@ interface ClaspRcV3 {
   };
 }
 
-// Scopes matching what @google/clasp requests, plus the broad Drive scope
-// (not drive.file — see trashScriptProject below for why) needed to trash
-// script projects by file ID.
+// Scopes matching what @google/clasp requests — this is Google's own
+// published, verified OAuth client for the clasp CLI, shared across every
+// clasp user. Verification is scope-specific: requesting a broader/more
+// sensitive scope than this client was verified for (e.g. the full
+// 'https://www.googleapis.com/auth/drive') triggers Google's hard
+// "this app is blocked" screen for every account, not just a misconfigured
+// one. Never add scopes here beyond what clasp itself already requests.
 const CLASP_SCOPES = [
   'https://www.googleapis.com/auth/script.projects',
   'https://www.googleapis.com/auth/script.webapp.deploy',
   'https://www.googleapis.com/auth/script.deployments',
-  'https://www.googleapis.com/auth/drive',
+  'https://www.googleapis.com/auth/drive.metadata.readonly',
+  'https://www.googleapis.com/auth/drive.file',
   'https://www.googleapis.com/auth/service.management',
   'https://www.googleapis.com/auth/logging.read',
   'https://www.googleapis.com/auth/userinfo.email',
@@ -361,82 +366,6 @@ export async function getAccessToken(): Promise<string> {
   fs.writeFileSync(CLASPRC_PATH, JSON.stringify(rc, null, 2));
 
   return updatedToken.access_token;
-}
-
-function hasGrantedScope(scope: string): boolean {
-  try {
-    const rc = JSON.parse(fs.readFileSync(CLASPRC_PATH, 'utf8')) as ClaspRcV3;
-    const granted = rc.tokens.default?.scope ?? '';
-    return granted.split(' ').includes(scope);
-  } catch {
-    return false;
-  }
-}
-
-// Thrown by trashScriptProject when the stored clasp token predates the
-// 'drive' scope being added to CLASP_SCOPES. Callers should surface
-// startDriveReauth()'s URL to the user instead of treating this as a
-// generic failure — see startDriveReauth below.
-export class DriveScopeRequiredError extends Error {}
-
-let driveReauthUrl: string | null = null;
-let driveReauthPromise: Promise<void> | null = null;
-
-export function getDriveReauthUrl(): string | null {
-  return driveReauthUrl;
-}
-
-// Kicks off (or reuses an in-flight) one-time re-consent for the broad
-// 'drive' scope, without blocking the caller on the full OAuth round trip.
-// The auth URL becomes available via getDriveReauthUrl() shortly after this
-// returns — callers should surface it to the user and ask them to retry the
-// original action once they've signed in.
-export function startDriveReauth(): Promise<void> {
-  if (!driveReauthPromise) {
-    driveReauthUrl = null;
-    driveReauthPromise = runClaspLoginBrowser((url) => { driveReauthUrl = url; })
-      .catch((err) => {
-        console.error(`[AutomateGS] Drive re-authentication failed: ${err}`);
-        throw err;
-      })
-      .finally(() => {
-        driveReauthPromise = null;
-        driveReauthUrl = null;
-      });
-  }
-  return driveReauthPromise;
-}
-
-// A standalone Apps Script project's scriptId is also its Drive file ID.
-// Trashing it (rather than permanently deleting) lets the owner recover it
-// from Drive's trash within Google's normal 30-day window. This requires the
-// broad drive scope: drive.file only covers files created/opened through the
-// Drive API itself, and project creation goes through the Apps Script API
-// instead, so files clasp creates aren't covered by drive.file. Accounts
-// that authenticated before drive scope was added to CLASP_SCOPES need a
-// one-time re-consent — see startDriveReauth above. We never trigger the
-// browser login inline here: that used to block the MCP tool call with no
-// way to tell the caller what was happening, and a wrong-account sign-in
-// would silently clobber working credentials.
-export async function trashScriptProject(scriptId: string): Promise<void> {
-  if (!hasGrantedScope('https://www.googleapis.com/auth/drive')) {
-    throw new DriveScopeRequiredError(
-      'Drive scope not granted yet; one-time re-authentication required.',
-    );
-  }
-
-  const token = await getAccessToken();
-  const res = await fetch(`https://www.googleapis.com/drive/v3/files/${scriptId}`, {
-    method: 'PATCH',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ trashed: true }),
-  });
-  if (!res.ok) {
-    throw new Error(`Failed to trash Drive file ${scriptId}: HTTP ${res.status} ${await res.text()}`);
-  }
 }
 
 /**

@@ -1,6 +1,6 @@
 {
   "name": "automategs-mcp",
-  "version": "1.1.8",
+  "version": "1.1.9",
   "type": "module",
   "description": "AI-powered Google Workspace automation tool for Claude Desktop",
   "main": "dist/launcher.mjs",
@@ -8,7 +8,7 @@
     "build": "node build.mjs",
     "dev": "npx tsx src/index.ts",
     "start": "node dist/launcher.mjs",
-    "package": "npm run build && zip -r automategs-mcp-1.1.8.mcpb manifest.json CLAUDE.md icon.png dist/launcher.mjs dist/index.mjs dist/clasp-cli.mjs"
+    "package": "npm run build && zip -r automategs-mcp-1.1.9.mcpb manifest.json CLAUDE.md icon.png dist/launcher.mjs dist/index.mjs dist/clasp-cli.mjs"
   },
   "dependencies": {
     "@google/clasp": "^3.3.0",
